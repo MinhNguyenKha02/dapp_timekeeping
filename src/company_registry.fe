@@ -1,0 +1,73 @@
+contract CompanyRegistry {
+    // State variables
+    struct Employee {
+        pub wallet_address: address
+        pub base_salary: u256
+        pub is_active: bool
+    }
+
+    struct SalaryPayment {
+        pub amount: u256
+        pub timestamp: u256
+        pub deductions: u256
+        pub bonus: u256
+    }
+
+    struct CompanyRule {
+        pub rule_id: String<100>
+        pub details: String<500>
+        pub last_updated: u256
+    }
+
+    // Storage
+    mapping(address => Employee) pub employees
+    mapping(address => Array<SalaryPayment>) pub salary_history
+    mapping(String<100> => CompanyRule) pub company_rules
+    
+    pub root_address: address
+
+    // Events
+    pub event EmployeeAdded {
+        wallet_address: address
+        base_salary: u256
+    }
+
+    pub event SalaryPaid {
+        employee: address
+        amount: u256
+        timestamp: u256
+    }
+
+    // Constructor
+    pub fn __init__(mut self, root: address) {
+        self.root_address = root
+    }
+
+    // Modifiers
+    fn only_root(self) {
+        assert msg.sender == self.root_address, "Only root can perform this action"
+    }
+
+    // Functions
+    pub fn add_employee(mut self, wallet: address, salary: u256) {
+        self.only_root()
+        let employee = Employee(wallet, salary, true)
+        self.employees[wallet] = employee
+        emit EmployeeAdded(wallet, salary)
+    }
+
+    pub fn pay_salary(mut self, employee: address, amount: u256, deductions: u256, bonus: u256) {
+        self.only_root()
+        assert self.employees[employee].is_active, "Employee not active"
+        
+        let payment = SalaryPayment(amount, block.timestamp, deductions, bonus)
+        self.salary_history[employee].push(payment)
+        emit SalaryPaid(employee, amount, block.timestamp)
+    }
+
+    pub fn update_company_rule(mut self, rule_id: String<100>, details: String<500>) {
+        self.only_root()
+        let rule = CompanyRule(rule_id, details, block.timestamp)
+        self.company_rules[rule_id] = rule
+    }
+} 
