@@ -1,12 +1,13 @@
 package main
 
 import (
+	"dapp_timekeeping/config"
+	"dapp_timekeeping/handlers"
+	"dapp_timekeeping/middleware"
 	"dapp_timekeeping/models"
 	"dapp_timekeeping/services"
 	"log"
-	"os"
 
-	"github.com/dfinity/agent-go/identity"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -17,9 +18,8 @@ var DB *gorm.DB
 var blockchainService *services.BlockchainService
 
 func initServices() error {
-	// Initialize SQLite
 	var err error
-	DB, err = gorm.Open(sqlite.Open("company.db"), &gorm.Config{})
+	DB, err = gorm.Open(sqlite.Open(config.AppConfig.DBPath), &gorm.Config{})
 	if err != nil {
 		return err
 	}
@@ -28,76 +28,49 @@ func initServices() error {
 	DB.AutoMigrate(&models.User{}, &models.Attendance{}, &models.LeaveRequest{}, &models.Violation{}, &models.Report{})
 
 	// Initialize ICP connection
-	pemFile := os.Getenv("ICP_IDENTITY_PEM")
-	identity, err := identity.NewIdentityFromPEM(pemFile)
-	if err != nil {
-		return err
-	}
-
-	canisterID := os.Getenv("COMPANY_REGISTRY_CANISTER_ID")
-	blockchainService, err = services.NewBlockchainService(identity, canisterID)
-	if err != nil {
-		return err
-	}
+	blockchainService = services.NewBlockchainService(config.AppConfig.CanisterID)
 
 	return nil
 }
 
-// Example of a handler that uses both SQLite and ICP
-func addEmployee(c *fiber.Ctx) error {
-	var employee struct {
-		Username      string  `json:"username"`
-		WalletAddress string  `json:"wallet_address"`
-		Salary        float64 `json:"salary"`
-	}
+func setupRoutes(app *fiber.App) {
+	// Public routes
+	app.Post("/login", handlers.Login)
+	app.Post("/register", handlers.Register)
+	app.Post("/logout", handlers.Logout)
 
-	if err := c.BodyParser(&employee); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid input"})
-	}
+	// Root only routes
+	root := app.Group("/root", middleware.RequireRoot)
+	root.Post("/employees", handlers.AddEmployee)
+	root.Post("/rules", handlers.UpdateCompanyRule)
+	root.Get("/reports", handlers.GenerateReports)
 
-	// Start database transaction
-	tx := DB.Begin()
+	// HR routes
+	hr := app.Group("/hr", middleware.RequireHR)
+	hr.Post("/attendance", handlers.RecordAttendance)
+	hr.Post("/violations", handlers.RecordViolation)
+	hr.Get("/leave-requests", handlers.GetLeaveRequests)
 
-	// Create user in SQLite
-	user := models.User{
-		Username:      employee.Username,
-		WalletAddress: employee.WalletAddress,
-		Salary:        employee.Salary,
-		Status:        "active",
-	}
-
-	if err := tx.Create(&user).Error; err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": "Database error"})
-	}
-
-	// Add to blockchain
-	ctx := c.Context()
-	err := blockchainService.AddEmployee(ctx, employee.WalletAddress, uint64(employee.Salary))
-	if err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": "Blockchain error"})
-	}
-
-	// Commit transaction
-	tx.Commit()
-
-	return c.JSON(fiber.Map{
-		"message": "Employee added successfully",
-		"user":    user,
-	})
+	// Employee routes
+	emp := app.Group("/employee", middleware.RequireAuth)
+	emp.Post("/check-in", handlers.CheckIn)
+	emp.Post("/check-out", handlers.CheckOut)
+	emp.Post("/leave-request", handlers.RequestLeave)
+	emp.Get("/salary", handlers.GetSalaryInfo)
 }
 
 func main() {
+	// Load configuration
+	config.LoadConfig()
+
 	if err := initServices(); err != nil {
 		log.Fatal("Failed to initialize services:", err)
 	}
 
+	// Initialize handlers with dependencies
+	handlers.InitHandlers(DB, blockchainService)
+
 	app := fiber.New()
-
-	// Routes
-	app.Post("/employees", addEmployee)
-	// Add more routes...
-
-	log.Fatal(app.Listen(":3000"))
+	setupRoutes(app)
+	log.Fatal(app.Listen(":" + config.AppConfig.Port))
 }
