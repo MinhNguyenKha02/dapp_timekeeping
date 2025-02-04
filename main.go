@@ -25,7 +25,7 @@ func initServices() error {
 	}
 
 	// Auto-migrate models
-	DB.AutoMigrate(&models.User{}, &models.Attendance{}, &models.LeaveRequest{}, &models.Violation{}, &models.Report{})
+	DB.AutoMigrate(&models.User{}, &models.Attendance{}, &models.LeaveRequest{}, &models.Violation{}, &models.Report{}, &models.CompanyRule{})
 
 	// Initialize ICP connection
 	blockchainService = services.NewBlockchainService(config.AppConfig.CanisterID)
@@ -59,6 +59,42 @@ func setupRoutes(app *fiber.App) {
 	emp.Get("/salary", handlers.GetSalaryInfo)
 }
 
+func setupRootRoutes(app *fiber.App) {
+	root := app.Group("/root", middleware.RequireRoot)
+
+	// Employee Management
+	root.Get("/dashboard", handlers.GetRootDashboard)
+	root.Get("/employees", handlers.GetAllEmployees)
+	root.Post("/employees", handlers.AddEmployee)
+	root.Patch("/employees/:id", handlers.UpdateEmployee)
+	root.Delete("/employees/:id", handlers.DeleteEmployee)
+
+	// Department Statistics
+	root.Get("/departments/stats", handlers.GetDepartmentStats)
+	root.Get("/departments/:id/attendance", handlers.GetDepartmentAttendance)
+
+	// Working Hours Rankings
+	root.Get("/rankings/work-hours", handlers.GetWorkHoursRanking)
+
+	// Permission Management
+	root.Post("/permissions/grant", handlers.GrantPermission)
+	root.Delete("/permissions/revoke", handlers.RevokePermission)
+
+	// Referral Management
+	root.Post("/referrals", handlers.GenerateReferralCode)
+	root.Get("/referrals", handlers.ListReferralCodes)
+
+	// Salary Management
+	root.Patch("/employees/:id/salary", handlers.UpdateSalary)
+	root.Get("/salary-approvals", handlers.GetPendingSalaryApprovals)
+	root.Post("/salary-approvals/:id/approve", handlers.ApproveSalary)
+
+	// Reports
+	root.Get("/reports/attendance", handlers.GenerateAttendanceReport)
+	root.Get("/reports/salary", handlers.GenerateSalaryReport)
+	root.Get("/reports/leave", handlers.GenerateLeaveReport)
+}
+
 func main() {
 	// Load configuration
 	config.LoadConfig()
@@ -72,5 +108,6 @@ func main() {
 
 	app := fiber.New()
 	setupRoutes(app)
+	setupRootRoutes(app)
 	log.Fatal(app.Listen(":" + config.AppConfig.Port))
 }
