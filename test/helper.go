@@ -1,10 +1,8 @@
 package test
 
 import (
-	"context"
 	"dapp_timekeeping/config"
 	"dapp_timekeeping/handlers"
-	"dapp_timekeeping/models"
 	"dapp_timekeeping/utils"
 	"log"
 	"os"
@@ -13,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -21,64 +20,6 @@ var (
 	testApp *fiber.App
 	testDB  *gorm.DB
 )
-
-type BlockchainCall struct {
-	Method        string
-	WalletAddress string
-	Salary        uint64
-	Timestamp     time.Time
-}
-
-type MockBlockchainService struct {
-	t     *testing.T
-	calls []BlockchainCall
-}
-
-// Create a constructor for MockBlockchainService
-func NewMockBlockchainService(t *testing.T) *MockBlockchainService {
-	return &MockBlockchainService{t: t}
-}
-
-func (m *MockBlockchainService) UpdateEmployeeSalary(ctx context.Context, walletAddress string, newSalary uint64) error {
-	m.t.Logf("MockBlockchain: UpdateEmployeeSalary called with wallet=%s, newSalary=%d", walletAddress, newSalary)
-	return nil
-}
-
-func (m *MockBlockchainService) GetEmployeeSalary(ctx context.Context, walletAddress string) (uint64, error) {
-	m.t.Logf("MockBlockchain: GetEmployeeSalary called with wallet=%s", walletAddress)
-	return 0, nil
-}
-
-func (m *MockBlockchainService) PaySalary(ctx context.Context, employee string, amount, deductions, bonus uint64) error {
-	m.t.Logf("MockBlockchain: PaySalary called with employee=%s, amount=%d, deductions=%d, bonus=%d",
-		employee, amount, deductions, bonus)
-	return nil
-}
-
-func (m *MockBlockchainService) UpdateCompanyRule(ctx context.Context, ruleID, details string) error {
-	m.t.Logf("MockBlockchain: UpdateCompanyRule called with ruleID=%s", ruleID)
-	return nil
-}
-
-func (m *MockBlockchainService) AddEmployeeSalary(ctx context.Context, walletAddress string, salary uint64) error {
-	m.calls = append(m.calls, BlockchainCall{
-		Method:        "AddEmployeeSalary",
-		WalletAddress: walletAddress,
-		Salary:        salary,
-		Timestamp:     time.Now(),
-	})
-	m.t.Logf("MockBlockchain: AddEmployeeSalary called with wallet=%s, salary=%d", walletAddress, salary)
-	return nil
-}
-
-var mockBlockchain *MockBlockchainService
-
-func GetMockBlockchain(t *testing.T) *MockBlockchainService {
-	if mockBlockchain == nil {
-		mockBlockchain = NewMockBlockchainService(t)
-	}
-	return mockBlockchain
-}
 
 func init() {
 	// Find and load .env file from project root
@@ -95,47 +36,39 @@ func init() {
 	}
 	os.Chdir(projectRoot)
 
-	// Load config with .env file
 	config.LoadConfig()
-
-	// Initialize logger
 	utils.InitLogger()
 
 	var err error
-	// Use a real file for test database
+	// Use in-memory SQLite for tests
 	testDB, err = gorm.Open(sqlite.Open("company.db"), &gorm.Config{})
 	if err != nil {
 		log.Fatal("Failed to connect to test database:", err)
 	}
 
-	// Clean up existing tables
-	testDB.Migrator().DropTable(
-		&models.User{},
-		&models.Attendance{},
-		&models.LeaveRequest{},
-		&models.Department{},
-		&models.Permission{},
-		&models.PermissionGrant{},
-		&models.SalaryApproval{},
-		&models.CompanyRule{},
-	)
+	// Initialize handlers with test DB
+	handlers.InitHandlers(testDB)
 
-	// Auto migrate models
-	testDB.AutoMigrate(
-		&models.User{},
-		&models.Attendance{},
-		&models.LeaveRequest{},
-		&models.Department{},
-		&models.Permission{},
-		&models.PermissionGrant{},
-		&models.SalaryApproval{},
-		&models.CompanyRule{},
-	)
-
-	// Use mock blockchain instead of real one
-	mockBlockchain = NewMockBlockchainService(nil)
-	handlers.InitHandlers(testDB, mockBlockchain)
+	// Create new Fiber app for each test
 	testApp = fiber.New()
+}
+
+func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
+	// Reset database
+	ResetTestDB()
+
+	// Create fresh app instance
+	testApp = fiber.New()
+	handlers.InitHandlers(testDB)
+
+	return testApp, testDB
+}
+
+func ResetTestDB() {
+	testDB.Exec("DELETE FROM users")
+	testDB.Exec("DELETE FROM attendances")
+	testDB.Exec("DELETE FROM leave_requests")
+	testDB.Exec("DELETE FROM company_rules")
 }
 
 func GetTestDB() *gorm.DB {
@@ -148,63 +81,16 @@ func GetTestApp() *fiber.App {
 
 // Helper function to create test JWT token
 func createTestToken(userID string, role string) string {
-	// Implementation here
-	return "test-token"
-}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": userID,
+		"role":    role,
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+	})
 
-// Add this function
-func ResetTestDB() {
-	// Clean up existing tables
-	testDB.Migrator().DropTable(
-		&models.User{},
-		&models.Attendance{},
-		&models.LeaveRequest{},
-		&models.Department{},
-		&models.Permission{},
-		&models.PermissionGrant{},
-		&models.SalaryApproval{},
-		&models.CompanyRule{},
-	)
-
-	// Auto migrate models
-	testDB.AutoMigrate(
-		&models.User{},
-		&models.Attendance{},
-		&models.LeaveRequest{},
-		&models.Department{},
-		&models.Permission{},
-		&models.PermissionGrant{},
-		&models.SalaryApproval{},
-		&models.CompanyRule{},
-	)
-}
-
-// Update the test setup to use the mock with logging
-func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
-	ResetTestDB()
-	mockBlockchain = NewMockBlockchainService(t)
-	handlers.InitHandlers(testDB, mockBlockchain)
-	return testApp, testDB
-}
-
-// Helper functions to verify blockchain calls
-func GetMockBlockchainCalls(t *testing.T, method string) int {
-	mock := GetMockBlockchain(t)
-	count := 0
-	for _, call := range mock.calls {
-		if call.Method == method {
-			count++
-		}
+	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	if err != nil {
+		log.Printf("Error creating test token: %v", err)
+		return ""
 	}
-	return count
-}
-
-func GetLastBlockchainCall(t *testing.T, method string) *BlockchainCall {
-	mock := GetMockBlockchain(t)
-	for i := len(mock.calls) - 1; i >= 0; i-- {
-		if mock.calls[i].Method == method {
-			return &mock.calls[i]
-		}
-	}
-	return nil
+	return tokenString
 }

@@ -68,17 +68,6 @@ func AddEmployee(c *fiber.Ctx) error {
 		})
 	}
 
-	// Add to blockchain
-	ctx := c.Context()
-	if err := BlockchainService.AddEmployeeSalary(ctx, employee.WalletAddress, uint64(employee.Salary)); err != nil {
-		tx.Rollback()
-		utils.Logger.Error("Failed to add employee salary to blockchain", zap.Error(err))
-		return c.Status(500).JSON(types.APIResponse{
-			Success: false,
-			Error:   types.ErrBlockchainError,
-		})
-	}
-
 	tx.Commit()
 
 	return c.JSON(types.APIResponse{
@@ -142,18 +131,6 @@ func UpdateEmployee(c *fiber.Ctx) error {
 		})
 	}
 
-	// Update blockchain if salary changed
-	if salary, ok := updateData["salary"].(float64); ok {
-		ctx := c.Context()
-		if err := BlockchainService.UpdateEmployeeSalary(ctx, employee.WalletAddress, uint64(salary)); err != nil {
-			tx.Rollback()
-			utils.Logger.Error("Failed to update salary on blockchain", zap.Error(err))
-			return c.Status(500).JSON(types.APIResponse{
-				Success: false,
-				Error:   types.ErrBlockchainError,
-			})
-		}
-	}
 
 	tx.Commit()
 

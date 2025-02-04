@@ -71,11 +71,6 @@ func TestAddEmployee(t *testing.T) {
 	assert.Equal(t, employee.WalletAddress, storedEmployee.WalletAddress)
 	assert.Equal(t, employee.Salary, storedEmployee.Salary)
 
-	// Verify blockchain call was made with correct data
-	assert.Equal(t, 1, GetMockBlockchainCalls(t, "AddEmployeeSalary"))
-	assert.Equal(t, employee.WalletAddress, GetLastBlockchainCall(t, "AddEmployeeSalary").WalletAddress)
-	assert.Equal(t, uint64(employee.Salary), GetLastBlockchainCall(t, "AddEmployeeSalary").Salary)
-
 	dumpUsers(t, "After Add")
 }
 

@@ -5,7 +5,6 @@ import (
 	"dapp_timekeeping/handlers"
 	"dapp_timekeeping/middleware"
 	"dapp_timekeeping/models"
-	"dapp_timekeeping/services"
 	"log"
 
 	"github.com/gofiber/fiber/v2"
@@ -15,7 +14,6 @@ import (
 
 // Database connection
 var DB *gorm.DB
-var blockchainService *services.BlockchainService
 
 func initServices() error {
 	var err error
@@ -26,9 +24,6 @@ func initServices() error {
 
 	// Auto-migrate models
 	DB.AutoMigrate(&models.User{}, &models.Attendance{}, &models.LeaveRequest{}, &models.Violation{}, &models.Report{}, &models.CompanyRule{})
-
-	// Initialize ICP connection
-	blockchainService = services.NewBlockchainService(config.AppConfig.CanisterID)
 
 	return nil
 }
@@ -102,9 +97,6 @@ func main() {
 	if err := initServices(); err != nil {
 		log.Fatal("Failed to initialize services:", err)
 	}
-
-	// Initialize handlers with dependencies
-	handlers.InitHandlers(DB, blockchainService)
 
 	app := fiber.New()
 	setupRoutes(app)
