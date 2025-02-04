@@ -5,7 +5,6 @@ import (
 	"dapp_timekeeping/config"
 	"dapp_timekeeping/handlers"
 	"dapp_timekeeping/models"
-	"dapp_timekeeping/services"
 	"dapp_timekeeping/utils"
 	"log"
 	"os"
@@ -22,9 +21,6 @@ var (
 	testApp *fiber.App
 	testDB  *gorm.DB
 )
-
-// Ensure MockBlockchainService implements the interface
-var _ services.BlockchainServiceInterface = (*MockBlockchainService)(nil)
 
 type BlockchainCall struct {
 	Method        string
