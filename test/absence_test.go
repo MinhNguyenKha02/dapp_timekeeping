@@ -15,7 +15,7 @@ import (
 
 type AbsenceResponse struct {
 	ID          string     `json:"id"`
-	Username    string     `json:"username"`
+	FullName    string     `json:"full_name"`
 	Department  string     `json:"department"`
 	Date        time.Time  `json:"date"`
 	Type        string     `json:"type"`
@@ -29,55 +29,88 @@ func TestGetAbsences(t *testing.T) {
 	app, db := SetupTest(t)
 	t.Log("Test setup completed")
 
-	// Log initial DB state
-	var userCount, absenceCount int64
-	db.Model(&models.User{}).Count(&userCount)
-	db.Model(&models.Absence{}).Count(&absenceCount)
-	t.Logf("Initial DB state - Users: %d, Absences: %d", userCount, absenceCount)
+	// Create root user first
+	rootUser := models.User{
+		ID:                uuid.New().String(),
+		FullName:          "Root Admin",
+		Email:             "root@company.com",
+		PhoneNumber:       "+1234567890",
+		Address:           "123 Admin St",
+		DateOfBirth:       time.Now().AddDate(-30, 0, 0),
+		Gender:            "male",
+		TaxID:             "TAX123",
+		HealthInsuranceID: "HI123",
+		SocialInsuranceID: "SI123",
+		Position:          "System Administrator",
+		Location:          "HQ",
+		OnboardDate:       time.Now(),
+		Role:              "root",
+		Department:        "Management",
+		WalletAddress:     "0x123...",
+		Salary:            10000,
+		LeaveBalance:      30,
+		Status:            "active",
+	}
+	if err := db.Create(&rootUser).Error; err != nil {
+		t.Fatalf("Failed to create root user: %v", err)
+	}
 
 	// Create test user
 	user := models.User{
-		ID:         uuid.New(),
-		Username:   "testuser",
-		Department: "IT",
-		Role:       "employee",
-		Status:     "active",
+		ID:                uuid.New().String(),
+		FullName:          "Test Employee",
+		Email:             "test@company.com",
+		PhoneNumber:       "+9876543210",
+		Address:           "456 Test St",
+		DateOfBirth:       time.Now().AddDate(-25, 0, 0),
+		Gender:            "female",
+		TaxID:             "TAX456",
+		HealthInsuranceID: "HI456",
+		SocialInsuranceID: "SI456",
+		Position:          "Software Engineer",
+		Location:          "Branch A",
+		OnboardDate:       time.Now(),
+		Role:              "employee",
+		Department:        "IT",
+		WalletAddress:     "0x456...",
+		Salary:            5000,
+		LeaveBalance:      20,
+		Status:            "active",
 	}
-	result := db.Create(&user)
-	assert.NoError(t, result.Error)
-	t.Logf("Created test user - ID: %s, Username: %s, Department: %s", user.ID, user.Username, user.Department)
 
-	// Create test absence
-	absence := models.Absence{
-		ID:     uuid.New(),
-		UserID: user.ID,
-		Date:   time.Now(),
-		Type:   "without_permission",
-		Reason: "Personal emergency",
-		Status: "pending",
+	// Create and verify in transaction
+	tx := db.Begin()
+	if err := tx.Create(&user).Error; err != nil {
+		tx.Rollback()
+		t.Fatalf("Failed to create user: %v", err)
 	}
-	result = db.Create(&absence)
-	assert.NoError(t, result.Error)
+
+	// Create absence with root user as processor
+	absence := models.Absence{
+		ID:          uuid.New().String(),
+		UserID:      user.ID,
+		Date:        time.Now(),
+		Type:        "without_permission",
+		Reason:      "Personal emergency",
+		Status:      "pending",
+		ProcessedBy: rootUser.ID, // Set root user as processor
+	}
+	if err := tx.Create(&absence).Error; err != nil {
+		tx.Rollback()
+		t.Fatalf("Failed to create absence: %v", err)
+	}
+
+	tx.Commit()
 	t.Logf("Created test absence - ID: %s, Type: %s, Status: %s", absence.ID, absence.Type, absence.Status)
 
-	// Create root user
-	rootUser := models.User{
-		ID:       uuid.New(),
-		Username: "root_user",
-		Role:     "root",
-		Status:   "active",
-	}
-	result = db.Create(&rootUser)
-	assert.NoError(t, result.Error)
-	t.Logf("Created root user - ID: %s, Username: %s, Role: %s", rootUser.ID, rootUser.Username, rootUser.Role)
-
 	// Verify data in DB
+	var userCount, absenceCount int64
 	db.Model(&models.User{}).Count(&userCount)
 	db.Model(&models.Absence{}).Count(&absenceCount)
 	t.Logf("After setup - Users: %d, Absences: %d", userCount, absenceCount)
 
 	// Generate test token
-	token := createTestToken(rootUser.ID.String(), "root")
+	token := createTestToken(rootUser.ID, "root")
 	t.Logf("Generated auth token for root user")
 
 	// Set up routes
@@ -102,10 +135,9 @@ func TestGetAbsences(t *testing.T) {
 				assert.True(t, ok)
 				assert.NotEmpty(t, absences)
 
-				// Convert first absence to map for checking
 				firstAbsence := absences[0].(map[string]interface{})
-				assert.Equal(t, absence.ID.String(), firstAbsence["id"])
-				assert.Equal(t, user.Username, firstAbsence["username"])
+				assert.Equal(t, absence.ID, firstAbsence["id"])
+				assert.Equal(t, user.FullName, firstAbsence["full_name"])
 				assert.Equal(t, user.Department, firstAbsence["department"])
 			},
 		},

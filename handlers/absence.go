@@ -11,7 +11,7 @@ import (
 
 type AbsenceResponse struct {
 	ID          string     `json:"id"`
-	Username    string     `json:"username"`
+	FullName    string     `json:"full_name"`
 	Date        time.Time  `json:"date"`
 	Type        string     `json:"type"` // with_permission, without_permission
 	Reason      string     `json:"reason"`
@@ -53,7 +53,7 @@ func GetAbsences(c *fiber.Ctx) error {
 
 	// Build the query
 	query := DB.Table("absences").
-		Select("absences.*, users.username, users.department, processors.username as processor_name").
+		Select("absences.*, users.full_name, users.department, processors.full_name as processor_name").
 		Joins("LEFT JOIN users ON users.id = absences.user_id").
 		Joins("LEFT JOIN users processors ON processors.id = absences.processed_by")
 
@@ -77,7 +77,7 @@ func GetAbsences(c *fiber.Ctx) error {
 	// Execute query
 	var absences []struct {
 		ID            string
-		Username      string
+		FullName      string
 		Date          time.Time
 		Type          string
 		Reason        string
@@ -100,7 +100,7 @@ func GetAbsences(c *fiber.Ctx) error {
 	for i, abs := range absences {
 		response[i] = AbsenceResponse{
 			ID:          abs.ID,
-			Username:    abs.Username,
+			FullName:    abs.FullName,
 			Date:        abs.Date,
 			Type:        abs.Type,
 			Reason:      abs.Reason,

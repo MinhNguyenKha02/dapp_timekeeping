@@ -5,6 +5,8 @@ import (
 	"dapp_timekeeping/types"
 	"dapp_timekeeping/utils"
 
+	"time"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -12,11 +14,19 @@ import (
 )
 
 type AddEmployeeRequest struct {
-	Username      string  `json:"username" validate:"required"`
-	WalletAddress string  `json:"wallet_address" validate:"required"`
-	Department    string  `json:"department" validate:"required"`
-	Salary        float64 `json:"salary" validate:"required,gt=0"`
-	Role          string  `json:"role" validate:"required,oneof=employee hr_manager accountant"`
+	FullName      string    `json:"full_name" validate:"required"`
+	Email         string    `json:"email" validate:"required,email"`
+	PhoneNumber   string    `json:"phone_number" validate:"required"`
+	Address       string    `json:"address" validate:"required"`
+	DateOfBirth   time.Time `json:"date_of_birth" validate:"required"`
+	Gender        string    `json:"gender" validate:"required,oneof=male female other"`
+	TaxID         string    `json:"tax_id" validate:"required"`
+	Position      string    `json:"position" validate:"required"`
+	Location      string    `json:"location" validate:"required"`
+	Department    string    `json:"department" validate:"required"`
+	WalletAddress string    `json:"wallet_address" validate:"required"`
+	Salary        float64   `json:"salary" validate:"required,gt=0"`
+	Role          string    `json:"role" validate:"required,oneof=employee hr_manager accountant"`
 }
 
 func GetAllEmployees(c *fiber.Ctx) error {
@@ -44,20 +54,29 @@ func AddEmployee(c *fiber.Ctx) error {
 		})
 	}
 
-	// Start transaction
-	tx := DB.Begin()
-
 	// Create new employee
 	employee := models.User{
-		ID:            uuid.New(),
-		Username:      req.Username,
-		WalletAddress: req.WalletAddress,
+		ID:            uuid.New().String(),
+		FullName:      req.FullName,
+		Email:         req.Email,
+		PhoneNumber:   req.PhoneNumber,
+		Address:       req.Address,
+		DateOfBirth:   req.DateOfBirth,
+		Gender:        req.Gender,
+		TaxID:         req.TaxID,
+		Position:      req.Position,
+		Location:      req.Location,
 		Department:    req.Department,
+		WalletAddress: req.WalletAddress,
 		Salary:        req.Salary,
 		Role:          req.Role,
 		Status:        "active",
 		LeaveBalance:  20, // Default leave balance
+		OnboardDate:   time.Now(),
 	}
+
+	// Start transaction
+	tx := DB.Begin()
 
 	if err := tx.Create(&employee).Error; err != nil {
 		tx.Rollback()
@@ -130,7 +149,6 @@ func UpdateEmployee(c *fiber.Ctx) error {
 			Error:   types.ErrDatabaseError,
 		})
 	}
-
 
 	tx.Commit()
 

@@ -7,31 +7,42 @@ import (
 )
 
 type User struct {
-	ID            uuid.UUID    `gorm:"type:uuid;primary_key;default:uuid_generate_v4()" json:"id"`
-	Username      string       `gorm:"unique;not null" json:"username"`
-	PasswordHash  string       `json:"-"`
-	Role          string       `gorm:"not null" json:"role"` // root, hr_manager, accountant, employee
-	Department    string       `json:"department"`           // IT, HR, Finance, etc.
-	ReferralCode  string       `json:"referral_code,omitempty"`
-	WalletAddress string       `json:"wallet_address"`
-	Salary        float64      `json:"salary"`
-	LeaveBalance  int          `json:"leave_balance"`
-	Status        string       `gorm:"not null;default:'active'" json:"status"` // active, inactive, left_company
-	Permissions   []Permission `gorm:"many2many:user_permissions;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"permissions"`
-	CreatedAt     time.Time    `gorm:"not null" json:"created_at"`
-	UpdatedAt     time.Time    `gorm:"not null" json:"updated_at"`
+	ID                 string       `gorm:"type:text;primary_key" json:"id"`
+	FullName           string       `gorm:"type:text;not null;default:''" json:"full_name"`
+	Email              string       `gorm:"type:text;unique;not null;default:''" json:"email"`
+	PhoneNumber        string       `gorm:"type:text;default:''" json:"phone_number"`
+	Address            string       `gorm:"type:text;default:''" json:"address"`
+	DateOfBirth        time.Time    `json:"date_of_birth"`
+	Gender             string       `gorm:"type:text;default:''" json:"gender"`
+	TaxID              string       `gorm:"type:text;default:''" json:"tax_id"`
+	HealthInsuranceID  string       `gorm:"type:text;default:''" json:"health_insurance_id"`
+	SocialInsuranceID  string       `gorm:"type:text;default:''" json:"social_insurance_id"`
+	NumberOfDependents int          `json:"number_of_dependents"`
+	Position           string       `gorm:"type:text;default:''" json:"position"`
+	Location           string       `gorm:"type:text;default:''" json:"location"`
+	OnboardDate        time.Time    `json:"onboard_date"`
+	Role               string       `gorm:"type:text;not null;default:'employee'" json:"role"`
+	Department         string       `gorm:"type:text;default:''" json:"department"`
+	ReferralCode       string       `json:"referral_code,omitempty"`
+	WalletAddress      string       `gorm:"type:text;default:''" json:"wallet_address"`
+	Salary             float64      `gorm:"default:0" json:"salary"`
+	LeaveBalance       int          `gorm:"default:0" json:"leave_balance"`
+	Status             string       `gorm:"type:text;not null;default:'active'" json:"status"`
+	Permissions        []Permission `gorm:"many2many:user_permissions;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"permissions"`
+	CreatedAt          time.Time    `gorm:"not null" json:"created_at"`
+	UpdatedAt          time.Time    `gorm:"not null" json:"updated_at"`
 }
 
 type Permission struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key;default:uuid_generate_v4()" json:"id"`
-	Name        string    `gorm:"unique;not null" json:"name"` // attendance_approval, salary_management, etc.
-	Description string    `json:"description"`
+	ID          string `gorm:"type:text;primary_key" json:"id"`
+	Name        string `gorm:"unique;not null" json:"name"` // attendance_approval, salary_management, etc.
+	Description string `json:"description"`
 }
 
 type Department struct {
-	ID        uuid.UUID `gorm:"type:uuid;primary_key;default:uuid_generate_v4()" json:"id"`
+	ID        string    `gorm:"type:text;primary_key" json:"id"`
 	Name      string    `gorm:"unique;not null" json:"name"`
-	ManagerID uuid.UUID `gorm:"type:uuid;not null" json:"manager_id"`
+	ManagerID string    `gorm:"type:text;not null" json:"manager_id"`
 	Manager   User      `gorm:"foreignKey:ManagerID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 	CreatedAt time.Time `gorm:"not null" json:"created_at"`
 	UpdatedAt time.Time `gorm:"not null" json:"updated_at"`
@@ -39,9 +50,9 @@ type Department struct {
 
 // For tracking delegated permissions
 type PermissionGrant struct {
-	ID           uuid.UUID `gorm:"type:uuid;primary_key"`
-	GrantedBy    uuid.UUID `json:"granted_by"`
-	GrantedTo    uuid.UUID `json:"granted_to"`
+	ID           string    `gorm:"type:text;primary_key" json:"id"`
+	GrantedBy    string    `gorm:"type:text" json:"granted_by"`
+	GrantedTo    string    `gorm:"type:text" json:"granted_to"`
 	PermissionID uint      `json:"permission_id"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	CreatedAt    time.Time
@@ -50,10 +61,10 @@ type PermissionGrant struct {
 
 // For salary approval workflow
 type SalaryApproval struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key;default:uuid_generate_v4()" json:"id"`
-	UserID      uuid.UUID `gorm:"type:uuid;not null" json:"user_id"`
+	ID          string    `gorm:"type:text;primary_key" json:"id"`
+	UserID      string    `gorm:"type:text;not null" json:"user_id"`
 	User        User      `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	ApprovedBy  uuid.UUID `gorm:"type:uuid" json:"approved_by"`
+	ApprovedBy  string    `gorm:"type:text" json:"approved_by"`
 	Approver    User      `gorm:"foreignKey:ApprovedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 	Month       time.Time `gorm:"not null" json:"month"`
 	BaseSalary  float64   `json:"base_salary"`
@@ -67,107 +78,36 @@ type SalaryApproval struct {
 }
 
 type Attendance struct {
-	ID            uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID        uuid.UUID `gorm:"type:uuid" json:"user_id"`
-	User          User      `gorm:"foreignKey:UserID"`
-	CheckInTime   time.Time `json:"check_in_time"`
-	CheckOutTime  time.Time `json:"check_out_time"`
-	Status        string    `json:"status"` // on_time, late, absent
-	ViolationType string    `json:"violation_type,omitempty"`
-	LeaveType     string    `json:"leave_type,omitempty"`
-}
-
-type LeaveRequest struct {
-	ID         uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID     uuid.UUID `gorm:"type:uuid"`
-	User       User      `gorm:"foreignKey:UserID"`
-	StartDate  time.Time `json:"start_date"`
-	EndDate    time.Time `json:"end_date"`
-	Type       string    `json:"type"` // resignation, vacation, sick, etc.
-	Reason     string    `json:"reason"`
-	Status     string    // pending, approved, rejected
-	ApprovedBy uuid.UUID `gorm:"type:uuid"`
-	Approver   User      `gorm:"foreignKey:ApprovedBy"`
-	ApprovedAt time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-type Violation struct {
-	ID              uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID          uuid.UUID `json:"user_id"`
-	Type            string    `json:"type"`
-	Date            time.Time `json:"date"`
-	Details         string    `json:"details"`
-	DeductionAmount float64   `json:"deduction_amount"`
-	User            User      `gorm:"foreignKey:UserID"`
-}
-
-type Report struct {
-	ID      uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID  uuid.UUID `gorm:"type:uuid" json:"user_id"`
-	User    User      `gorm:"foreignKey:UserID"`
-	Type    string    `json:"type"`
-	Date    time.Time `json:"date"`
-	FileURL string    `json:"file_url"`
-}
-
-type CompanyRule struct {
-	ID        uuid.UUID `gorm:"type:uuid;primary_key"`
-	RuleName  string    `json:"rule_name"`
-	Details   string    `json:"details"`
-	CreatedBy uuid.UUID `json:"created_by"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID           string    `gorm:"type:text;primary_key" json:"id"`
+	UserID       string    `gorm:"type:text" json:"user_id"`
+	User         User      `gorm:"foreignKey:UserID"`
+	CheckInTime  time.Time `json:"check_in_time"`
+	CheckOutTime time.Time `json:"check_out_time"`
 }
 
 type Absence struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID      uuid.UUID `gorm:"type:uuid" json:"user_id"`
-	User        User      `gorm:"foreignKey:UserID"`
+	ID          string `gorm:"type:text;primary_key" json:"id"`
+	UserID      string `gorm:"type:text;references:users(id)" json:"user_id"`
+	User        User   `gorm:"foreignKey:UserID;references:ID"`
 	Date        time.Time
-	Type        string // with_permission, without_permission
+	Type        string
 	Reason      string
-	Status      string    // pending, processed
-	ProcessedBy uuid.UUID `gorm:"type:uuid" json:"processed_by"`
-	Processor   User      `gorm:"foreignKey:ProcessedBy"`
+	Status      string
+	ProcessedBy string `gorm:"type:text;references:users(id)" json:"processed_by"`
+	Processor   User   `gorm:"foreignKey:ProcessedBy;references:ID"`
 	ProcessedAt time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
 
 type UserPermission struct {
-	ID           uuid.UUID `gorm:"type:uuid;primary_key"`
-	UserID       uuid.UUID `gorm:"type:uuid" json:"user_id"`
-	User         User      `gorm:"foreignKey:UserID"`
+	ID           string `gorm:"type:text;primary_key" json:"id"`
+	UserID       string `gorm:"type:text;primary_key" json:"user_id"`
+	User         User   `gorm:"foreignKey:UserID"`
 	PermissionID uint
 	GrantedBy    uuid.UUID `gorm:"type:uuid" json:"granted_by"`
 	Granter      User      `gorm:"foreignKey:GrantedBy"`
 	ExpiresAt    time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-}
-
-type ReferralCode struct {
-	ID        uuid.UUID `gorm:"type:uuid;primary_key"`
-	Code      string    `gorm:"unique"`
-	CreatedBy uuid.UUID `gorm:"type:uuid"`
-	UsedBy    uuid.UUID `gorm:"type:uuid"`
-	Creator   User      `gorm:"foreignKey:CreatedBy"`
-	User      User      `gorm:"foreignKey:UsedBy"`
-	ExpiresAt time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-type PayrollApproval struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key;onDelete:CASCADE"`
-	Month       time.Time
-	Department  string
-	TotalAmount float64
-	Status      string // pending, approved
-	ApprovedBy  uuid.UUID
-	ApprovedAt  time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
 }

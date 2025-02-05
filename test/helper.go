@@ -3,6 +3,7 @@ package test
 import (
 	"dapp_timekeeping/config"
 	"dapp_timekeeping/handlers"
+	"dapp_timekeeping/models"
 	"dapp_timekeeping/utils"
 	"log"
 	"os"
@@ -40,8 +41,10 @@ func init() {
 	utils.InitLogger()
 
 	var err error
-	// Use in-memory SQLite for tests
-	testDB, err = gorm.Open(sqlite.Open("company.db"), &gorm.Config{})
+	// Use file-based SQLite for tests with foreign key support only
+	testDB, err = gorm.Open(sqlite.Open("company.db?_foreign_keys=on"), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: false,
+	})
 	if err != nil {
 		log.Fatal("Failed to connect to test database:", err)
 	}
@@ -54,6 +57,38 @@ func init() {
 }
 
 func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
+	// Drop existing tables first
+	testDB.Migrator().DropTable(
+		"uuid_table",
+		&models.UserPermission{},
+		&models.Absence{},
+		&models.Attendance{},
+		&models.PermissionGrant{},
+		&models.SalaryApproval{},
+		&models.Department{},
+		&models.Permission{},
+		&models.User{},
+	)
+
+	// Then create tables in correct order
+	err := testDB.AutoMigrate(
+		&models.User{},       // Users first
+		&models.Permission{}, // Then independent tables
+		&models.Department{},
+		&models.Absence{}, // Then tables with foreign keys
+		&models.Attendance{},
+		&models.UserPermission{},
+		&models.PermissionGrant{},
+		&models.SalaryApproval{},
+	)
+	if err != nil {
+		t.Fatalf("Failed to migrate test database: %v", err)
+	}
+
+	// Print schema for debugging
+	schema, _ := testDB.Migrator().GetTables()
+	t.Logf("Database schema: %v", schema)
+
 	// Reset database
 	ResetTestDB()
 
@@ -65,11 +100,15 @@ func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
 }
 
 func ResetTestDB() {
+	// Clear tables in correct order to respect foreign keys
+	testDB.Exec("DELETE FROM user_permissions")
 	testDB.Exec("DELETE FROM absences")
-	testDB.Exec("DELETE FROM users")
 	testDB.Exec("DELETE FROM attendances")
-	testDB.Exec("DELETE FROM leave_requests")
-	testDB.Exec("DELETE FROM company_rules")
+	testDB.Exec("DELETE FROM permission_grants")
+	testDB.Exec("DELETE FROM salary_approvals")
+	testDB.Exec("DELETE FROM departments")
+	testDB.Exec("DELETE FROM permissions")
+	testDB.Exec("DELETE FROM users") // Delete users last since other tables reference it
 }
 
 func GetTestDB() *gorm.DB {
