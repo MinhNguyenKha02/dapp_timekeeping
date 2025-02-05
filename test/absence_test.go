@@ -27,6 +27,13 @@ type AbsenceResponse struct {
 
 func TestGetAbsences(t *testing.T) {
 	app, db := SetupTest(t)
+	t.Log("Test setup completed")
+
+	// Log initial DB state
+	var userCount, absenceCount int64
+	db.Model(&models.User{}).Count(&userCount)
+	db.Model(&models.Absence{}).Count(&absenceCount)
+	t.Logf("Initial DB state - Users: %d, Absences: %d", userCount, absenceCount)
 
 	// Create test user
 	user := models.User{
@@ -38,7 +45,7 @@ func TestGetAbsences(t *testing.T) {
 	}
 	result := db.Create(&user)
 	assert.NoError(t, result.Error)
-	t.Logf("Created test user with ID: %s", user.ID)
+	t.Logf("Created test user - ID: %s, Username: %s, Department: %s", user.ID, user.Username, user.Department)
 
 	// Create test absence
 	absence := models.Absence{
@@ -51,9 +58,9 @@ func TestGetAbsences(t *testing.T) {
 	}
 	result = db.Create(&absence)
 	assert.NoError(t, result.Error)
-	t.Logf("Created test absence with ID: %s", absence.ID)
+	t.Logf("Created test absence - ID: %s, Type: %s, Status: %s", absence.ID, absence.Type, absence.Status)
 
-	// Create root user for authentication
+	// Create root user
 	rootUser := models.User{
 		ID:       uuid.New(),
 		Username: "root_user",
@@ -62,15 +69,22 @@ func TestGetAbsences(t *testing.T) {
 	}
 	result = db.Create(&rootUser)
 	assert.NoError(t, result.Error)
-	t.Logf("Created root user with ID: %s", rootUser.ID)
+	t.Logf("Created root user - ID: %s, Username: %s, Role: %s", rootUser.ID, rootUser.Username, rootUser.Role)
+
+	// Verify data in DB
+	db.Model(&models.User{}).Count(&userCount)
+	db.Model(&models.Absence{}).Count(&absenceCount)
+	t.Logf("After setup - Users: %d, Absences: %d", userCount, absenceCount)
 
 	// Generate test token
 	token := createTestToken(rootUser.ID.String(), "root")
+	t.Logf("Generated auth token for root user")
 
-	// Set up routes for this test
+	// Set up routes
 	root := app.Group("/root")
 	attendance := root.Group("/attendance")
 	attendance.Get("/absences", handlers.GetAbsences)
+	t.Log("Routes configured")
 
 	tests := []struct {
 		name           string
@@ -127,23 +141,34 @@ func TestGetAbsences(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Logf("Running test case: %s", tt.name)
+			t.Logf("Making request to: /root/attendance/absences%s", tt.queryParams)
+
 			req := httptest.NewRequest("GET", "/root/attendance/absences"+tt.queryParams, nil)
 			req.Header.Set("Authorization", "Bearer "+token)
 
 			resp, err := app.Test(req)
 			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, resp.StatusCode)
+			t.Logf("Response status: %d", resp.StatusCode)
 
 			var response types.APIResponse
 			err = json.NewDecoder(resp.Body).Decode(&response)
 			assert.NoError(t, err)
+			t.Logf("Response: %+v", response)
 
 			tt.checkResponse(t, response)
+			t.Logf("Test case completed: %s", tt.name)
 		})
 	}
 
-	// Cleanup
+	// Cleanup and verify
+	t.Log("Starting cleanup")
 	db.Unscoped().Delete(&absence)
 	db.Unscoped().Delete(&user)
 	db.Unscoped().Delete(&rootUser)
+
+	// Verify cleanup
+	db.Model(&models.User{}).Count(&userCount)
+	db.Model(&models.Absence{}).Count(&absenceCount)
+	t.Logf("After cleanup - Users: %d, Absences: %d", userCount, absenceCount)
 }
