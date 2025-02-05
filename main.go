@@ -23,7 +23,21 @@ func initServices() error {
 	}
 
 	// Auto-migrate models
-	DB.AutoMigrate(&models.User{}, &models.Attendance{}, &models.LeaveRequest{}, &models.Violation{}, &models.Report{}, &models.CompanyRule{})
+	DB.AutoMigrate(
+		&models.User{},
+		&models.Permission{},
+		&models.Department{},
+		&models.SalaryApproval{},
+		&models.Attendance{},
+		&models.LeaveRequest{},
+		&models.Violation{},
+		&models.Report{},
+		&models.CompanyRule{},
+		&models.Absence{},
+		&models.UserPermission{},
+		&models.ReferralCode{},
+		&models.PayrollApproval{},
+	)
 
 	return nil
 }
@@ -57,37 +71,66 @@ func setupRoutes(app *fiber.App) {
 func setupRootRoutes(app *fiber.App) {
 	root := app.Group("/root", middleware.RequireRoot)
 
+	// // Dashboard Statistics
+	// root.Get("/dashboard", handlers.GetDashboardStats)
+	// // Returns:
+	// // - late_employees_count
+	// // - absent_with_permission_count
+	// // - absent_without_permission_count
+	// // - unprocessed_absences_count
+	// // - resigned_employees_count
+	// // - average_check_in_time
+	// // - average_check_out_time
+	// // - department_stats
+	// // - top_workers_ranking
+
+	// Attendance Management
+	attendance := root.Group("/attendance")
+	// attendance.Get("/late", handlers.GetLateEmployees)
+	attendance.Get("/absences", handlers.GetAbsences)
+	// attendance.Get("/unprocessed", handlers.GetUnprocessedAbsences)
+	// attendance.Post("/process/:id", handlers.ProcessAbsence)
+	// attendance.Get("/department/:id", handlers.GetDepartmentAttendance)
+
+	// // Leave Management
+	// leaves := root.Group("/leaves")
+	// leaves.Get("/pending", handlers.GetPendingLeaves)
+	// leaves.Get("/approved", handlers.GetApprovedLeaves)
+	// leaves.Post("/:id/approve", handlers.ApproveLeave)
+	// leaves.Post("/:id/reject", handlers.RejectLeave)
+
 	// Employee Management
-	root.Get("/dashboard", handlers.GetRootDashboard)
-	root.Get("/employees", handlers.GetAllEmployees)
-	root.Post("/employees", handlers.AddEmployee)
-	root.Patch("/employees/:id", handlers.UpdateEmployee)
-	root.Delete("/employees/:id", handlers.DeleteEmployee)
+	employees := root.Group("/employees")
+	employees.Get("/", handlers.GetAllEmployees)
+	employees.Post("/", handlers.AddEmployee)
+	employees.Patch("/:id", handlers.UpdateEmployee)
+	employees.Delete("/:id", handlers.DeleteEmployee)
+	employees.Put("/:id/salary", handlers.UpdateSalary)
 
-	// Department Statistics
-	root.Get("/departments/stats", handlers.GetDepartmentStats)
-	root.Get("/departments/:id/attendance", handlers.GetDepartmentAttendance)
+	// // Permission Management
+	// permissions := root.Group("/permissions")
+	// permissions.Post("/grant", handlers.GrantPermission)
+	// permissions.Delete("/revoke", handlers.RevokePermission)
+	// permissions.Get("/user/:id", handlers.GetUserPermissions)
 
-	// Working Hours Rankings
-	root.Get("/rankings/work-hours", handlers.GetWorkHoursRanking)
+	// // Referral Management
+	// referrals := root.Group("/referrals")
+	// referrals.Post("/generate", handlers.GenerateReferralCode)
+	// referrals.Get("/", handlers.ListReferralCodes)
+	// referrals.Delete("/:code", handlers.DeleteReferralCode)
 
-	// Permission Management
-	root.Post("/permissions/grant", handlers.GrantPermission)
-	root.Delete("/permissions/revoke", handlers.RevokePermission)
+	// // Payroll Management
+	// payroll := root.Group("/payroll")
+	// payroll.Get("/pending", handlers.GetPendingPayroll)
+	// payroll.Post("/approve", handlers.ApprovePayroll)
+	// payroll.Get("/history", handlers.GetPayrollHistory)
 
-	// Referral Management
-	root.Post("/referrals", handlers.GenerateReferralCode)
-	root.Get("/referrals", handlers.ListReferralCodes)
-
-	// Salary Management
-	root.Patch("/employees/:id/salary", handlers.UpdateSalary)
-	root.Get("/salary-approvals", handlers.GetPendingSalaryApprovals)
-	root.Post("/salary-approvals/:id/approve", handlers.ApproveSalary)
-
-	// Reports
-	root.Get("/reports/attendance", handlers.GenerateAttendanceReport)
-	root.Get("/reports/salary", handlers.GenerateSalaryReport)
-	root.Get("/reports/leave", handlers.GenerateLeaveReport)
+	// // Reports
+	// reports := root.Group("/reports")
+	// reports.Get("/attendance", handlers.ExportAttendanceReport)
+	// reports.Get("/salary", handlers.ExportSalaryReport)
+	// reports.Get("/leave", handlers.ExportLeaveReport)
+	// reports.Get("/violations", handlers.ExportViolationsReport)
 }
 
 func main() {
@@ -99,7 +142,7 @@ func main() {
 	}
 
 	app := fiber.New()
-	setupRoutes(app)
+	// setupRoutes(app)
 	setupRootRoutes(app)
 	log.Fatal(app.Listen(":" + config.AppConfig.Port))
 }
