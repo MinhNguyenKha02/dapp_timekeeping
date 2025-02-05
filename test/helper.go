@@ -65,6 +65,7 @@ func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
 }
 
 func ResetTestDB() {
+	testDB.Exec("DELETE FROM absences")
 	testDB.Exec("DELETE FROM users")
 	testDB.Exec("DELETE FROM attendances")
 	testDB.Exec("DELETE FROM leave_requests")
