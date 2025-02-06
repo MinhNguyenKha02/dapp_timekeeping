@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -27,6 +28,15 @@ type AddEmployeeRequest struct {
 	WalletAddress string    `json:"wallet_address" validate:"required"`
 	Salary        float64   `json:"salary" validate:"required,gt=0"`
 	Role          string    `json:"role" validate:"required,oneof=employee hr hr_manager accountant"`
+}
+
+type UpdateEmployeeRequest struct {
+	FullName    string  `json:"full_name"`
+	Email       string  `json:"email"`
+	PhoneNumber string  `json:"phone_number"`
+	Position    string  `json:"position"`
+	Department  string  `json:"department"`
+	Salary      float64 `json:"salary"`
 }
 
 func GetAllEmployees(c *fiber.Ctx) error {
@@ -104,6 +114,26 @@ func GetSalaryInfo(c *fiber.Ctx) error {
 }
 
 func UpdateEmployee(c *fiber.Ctx) error {
+	// Get claims from context
+	claims := c.Locals("claims").(jwt.MapClaims)
+	userRole := claims["role"].(string)
+
+	var req UpdateEmployeeRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(types.APIResponse{
+			Success: false,
+			Error:   "Invalid request body",
+		})
+	}
+
+	// Only root can update salary
+	if req.Salary != 0 && userRole != "root" {
+		return c.Status(403).JSON(types.APIResponse{
+			Success: false,
+			Error:   "Only root can update salary",
+		})
+	}
+
 	id := c.Params("id")
 	userID, err := uuid.Parse(id)
 	if err != nil {

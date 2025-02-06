@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
@@ -195,4 +197,104 @@ func TestDeleteEmployee(t *testing.T) {
 	err = db.First(&deletedEmployee, "id = ?", employee.ID).Error
 	assert.Nil(t, err)
 	assert.Equal(t, "left_company", deletedEmployee.Status)
+}
+
+func TestRootUpdateEmployeeSalary(t *testing.T) {
+	app, db := SetupTest(t)
+
+	// Set up route with JWT middleware
+	app.Patch("/employees/:id", func(c *fiber.Ctx) error {
+		// Set claims for the request
+		c.Locals("claims", jwt.MapClaims{
+			"role": c.Get("X-Test-Role", ""), // Will be set in test requests
+			"id":   c.Get("X-Test-ID", ""),
+		})
+		return handlers.UpdateEmployee(c)
+	})
+
+	// Create root user with complete details
+	rootUser := models.User{
+		ID:                uuid.New().String(),
+		FullName:          "Root Admin",
+		Email:             "root@company.com",
+		PhoneNumber:       "+1234567890",
+		Address:           "123 Admin St",
+		DateOfBirth:       time.Now().AddDate(-35, 0, 0),
+		Gender:            "male",
+		TaxID:             "ROOT123",
+		HealthInsuranceID: "HI-ROOT123",
+		SocialInsuranceID: "SI-ROOT123",
+		Position:          "System Admin",
+		Location:          "HQ",
+		Department:        "IT",
+		WalletAddress:     "0xroot...",
+		Role:              "root",
+		Status:            "active",
+		OnboardDate:       time.Now().AddDate(-2, 0, 0),
+	}
+	db.Create(&rootUser)
+	t.Logf("Created root user: %+v", rootUser)
+
+	// Create test employee with complete details
+	employee := models.User{
+		ID:                uuid.New().String(),
+		FullName:          "Test Employee",
+		Email:             "employee@company.com",
+		PhoneNumber:       "+9876543210",
+		Address:           "456 Staff St",
+		DateOfBirth:       time.Now().AddDate(-25, 0, 0),
+		Gender:            "female",
+		TaxID:             "EMP456",
+		HealthInsuranceID: "HI-EMP456",
+		SocialInsuranceID: "SI-EMP456",
+		Position:          "Staff",
+		Location:          "Branch A",
+		Department:        "Operations",
+		WalletAddress:     "0xemp...",
+		Salary:            5000,
+		Role:              "employee",
+		Status:            "active",
+		OnboardDate:       time.Now().AddDate(0, -6, 0),
+		LeaveBalance:      20,
+	}
+	db.Create(&employee)
+	t.Logf("Initial employee details: %+v", employee)
+
+	// Root updates employee salary
+	rootToken := createTestToken(rootUser.ID, "root")
+	updateReq := handlers.UpdateEmployeeRequest{
+		Salary: 6000,
+	}
+	body, _ := json.Marshal(updateReq)
+	req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
+	req.Header.Set("Authorization", "Bearer "+rootToken)
+	req.Header.Set("X-Test-Role", "root") // Set test role
+	req.Header.Set("X-Test-ID", rootUser.ID)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	// Verify salary was updated
+	var updatedEmployee models.User
+	err = db.First(&updatedEmployee, "id = ?", employee.ID).Error
+	assert.NoError(t, err)
+	assert.Equal(t, float64(6000), updatedEmployee.Salary)
+	t.Logf("Updated employee salary: %v", updatedEmployee.Salary)
+
+	// Try updating salary with non-root user (should fail)
+	employeeToken := createTestToken(employee.ID, "employee")
+	req = httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
+	req.Header.Set("Authorization", "Bearer "+employeeToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 403, resp.StatusCode)
+	t.Log("Non-root user cannot update salary")
+
+	// Cleanup
+	db.Unscoped().Delete(&employee)
+	db.Unscoped().Delete(&rootUser)
 }
