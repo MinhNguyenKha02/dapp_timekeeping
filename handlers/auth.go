@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"sync"
+	"time"
 
 	"dapp_timekeeping/types"
 	"dapp_timekeeping/utils"
@@ -13,52 +14,61 @@ import (
 	"go.uber.org/zap"
 )
 
-// In-memory cache for login codes
+// ActiveCode represents the current active login code
+type ActiveCode struct {
+	Code      string `json:"code"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// In-memory cache for login code
 var (
-	loginCodes = make(map[string]string) // code -> random unique string
+	activeCode ActiveCode
 	codeMutex  sync.RWMutex
 )
 
-// GenerateLoginCode generates a random code for employee login
-func GenerateLoginCode(c *fiber.Ctx) error {
-	var claims jwt.MapClaims
-	if c.Locals("claims") != nil {
-		claims = c.Locals("claims").(jwt.MapClaims)
-	} else {
-		// For testing purposes
-		claims = jwt.MapClaims{
-			"role": c.Get("X-Test-Role", ""),
-		}
-	}
-
-	if claims["role"] != "root" {
-		return c.Status(403).JSON(types.APIResponse{
-			Success: false,
-			Error:   "Only root can generate login codes",
-		})
-	}
-
-	// Generate random 8-character code
+// generateNewCode creates a new random code and updates the active code
+func generateNewCode() error {
 	bytes := make([]byte, 6)
 	if _, err := rand.Read(bytes); err != nil {
-		utils.Logger.Error("Failed to generate random bytes", zap.Error(err))
-		return c.Status(500).JSON(types.APIResponse{
-			Success: false,
-			Error:   "internal server error",
-		})
+		return err
 	}
 	code := base64.URLEncoding.EncodeToString(bytes)[:8]
 
-	// Store in memory cache
 	codeMutex.Lock()
-	loginCodes[code] = "active"
+	activeCode = ActiveCode{
+		Code:      code,
+		CreatedAt: time.Now().Unix(),
+	}
 	codeMutex.Unlock()
+	return nil
+}
+
+// GetActiveCode returns or generates the active code (root only)
+func GetActiveCode(c *fiber.Ctx) error {
+	if c.Locals("claims").(jwt.MapClaims)["role"] != "root" {
+		return c.Status(403).JSON(types.APIResponse{
+			Success: false,
+			Error:   "Only root can view active code",
+		})
+	}
+
+	codeMutex.RLock()
+	code := activeCode
+	codeMutex.RUnlock()
+
+	if code.Code == "" {
+		if err := generateNewCode(); err != nil {
+			return c.Status(500).JSON(types.APIResponse{
+				Success: false,
+				Error:   "internal server error",
+			})
+		}
+		code = activeCode
+	}
 
 	return c.JSON(types.APIResponse{
 		Success: true,
-		Data: map[string]interface{}{
-			"code": code,
-		},
+		Data:    code,
 	})
 }
 
@@ -67,7 +77,6 @@ func LoginWithCode(c *fiber.Ctx) error {
 	var req struct {
 		Code string `json:"code" validate:"required"`
 	}
-
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(types.APIResponse{
 			Success: false,
@@ -75,9 +84,8 @@ func LoginWithCode(c *fiber.Ctx) error {
 		})
 	}
 
-	// Validate code
 	codeMutex.RLock()
-	_, valid := loginCodes[req.Code]
+	valid := req.Code == activeCode.Code
 	codeMutex.RUnlock()
 
 	if !valid {
@@ -87,29 +95,10 @@ func LoginWithCode(c *fiber.Ctx) error {
 		})
 	}
 
-	// Generate new code for next login
-	newBytes := make([]byte, 6)
-	if _, err := rand.Read(newBytes); err != nil {
-		utils.Logger.Error("Failed to generate new code", zap.Error(err))
-		return c.Status(500).JSON(types.APIResponse{
-			Success: false,
-			Error:   "internal server error",
-		})
-	}
-	newCode := base64.URLEncoding.EncodeToString(newBytes)[:8]
-
-	// Update code in cache
-	codeMutex.Lock()
-	delete(loginCodes, req.Code)
-	loginCodes[newCode] = "active"
-	codeMutex.Unlock()
-
-	// Generate JWT token for the employee
+	// Generate JWT token
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims := token.Claims.(jwt.MapClaims)
 	claims["role"] = "employee"
-	// Add other necessary claims
-
 	t, err := token.SignedString([]byte(utils.Config.JWTSecret))
 	if err != nil {
 		return c.Status(500).JSON(types.APIResponse{
@@ -118,11 +107,19 @@ func LoginWithCode(c *fiber.Ctx) error {
 		})
 	}
 
+	// Generate new code after successful login
+	if err := generateNewCode(); err != nil {
+		utils.Logger.Error("Failed to generate new code", zap.Error(err))
+	}
+
 	return c.JSON(types.APIResponse{
 		Success: true,
 		Data: map[string]interface{}{
-			"token":   t,
-			"newCode": newCode,
+			"token": t,
+			"newCode": map[string]interface{}{
+				"code":      activeCode.Code,
+				"createdAt": activeCode.CreatedAt,
+			},
 		},
 	})
 }

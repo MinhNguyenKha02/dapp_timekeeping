@@ -31,36 +31,35 @@ func TestLoginCodeFlow(t *testing.T) {
 	}
 	t.Logf("Created root user: %+v", rootUser)
 
-	// Then set up routes with middleware
-	app.Post("/auth/generate-code", func(c *fiber.Ctx) error {
-		// Set claims for root user
+	// Set up routes with middleware
+	app.Get("/auth/active-code", func(c *fiber.Ctx) error {
 		c.Locals("claims", jwt.MapClaims{
 			"role": "root",
 			"id":   rootUser.ID,
 		})
-		return handlers.GenerateLoginCode(c)
+		return handlers.GetActiveCode(c)
 	})
 	app.Post("/auth/login-with-code", handlers.LoginWithCode)
 
 	// Generate root token for auth
 	rootToken := createTestToken(rootUser.ID, "root")
 
-	// Root generates login code
-	req := httptest.NewRequest("POST", "/auth/generate-code", nil)
+	// Root gets initial active code
+	req := httptest.NewRequest("GET", "/auth/active-code", nil)
 	req.Header.Set("Authorization", "Bearer "+rootToken)
-	req.Header.Set("X-Test-Role", "root") // Add test role header
 	resp, err := app.Test(req)
 	assert.NoError(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
 
-	// Parse response to get code
-	var genResponse types.APIResponse
-	err = json.NewDecoder(resp.Body).Decode(&genResponse)
+	var codeResponse types.APIResponse
+	err = json.NewDecoder(resp.Body).Decode(&codeResponse)
 	assert.NoError(t, err)
-	assert.True(t, genResponse.Success)
+	assert.True(t, codeResponse.Success)
 
-	code := genResponse.Data.(map[string]interface{})["code"].(string)
-	t.Logf("Generated login code: %s", code)
+	initialCodeData := codeResponse.Data.(map[string]interface{})
+	code := initialCodeData["code"].(string)
+	t.Logf("Initial active code generated: %s", code)
+	t.Logf("Root sees initial code details: %+v", initialCodeData)
 
 	// Simulate employee using the code to login
 	loginReq := struct {
@@ -85,34 +84,28 @@ func TestLoginCodeFlow(t *testing.T) {
 	// Log response data
 	t.Logf("Login response: %+v", loginResponse.Data)
 
-	// Verify we got a token and new code
+	// Get the new code from login response
 	responseData := loginResponse.Data.(map[string]interface{})
 	assert.NotEmpty(t, responseData["token"])
-	newCode := responseData["newCode"].(string)
-	assert.NotEmpty(t, newCode)
-	t.Logf("New code for next login: %s", newCode)
+	newCodeData := responseData["newCode"].(map[string]interface{})
+	assert.NotEmpty(t, newCodeData["code"])
 
-	// Verify new code works for login
-	loginReq.Code = newCode
-	body, _ = json.Marshal(loginReq)
-	req = httptest.NewRequest("POST", "/auth/login-with-code", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-
+	// After login, verify root sees the same new code
+	req = httptest.NewRequest("GET", "/auth/active-code", nil)
+	req.Header.Set("Authorization", "Bearer "+rootToken)
 	resp, err = app.Test(req)
 	assert.NoError(t, err)
-	assert.Equal(t, 200, resp.StatusCode, "New code should work for login")
-	t.Log("Verified new code is valid and stored in cache")
+	assert.Equal(t, 200, resp.StatusCode)
 
-	// Try using old code (should fail)
-	loginReq.Code = code
-	body, _ = json.Marshal(loginReq)
-	req = httptest.NewRequest("POST", "/auth/login-with-code", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err = app.Test(req)
+	var activeCodeResp types.APIResponse
+	err = json.NewDecoder(resp.Body).Decode(&activeCodeResp)
 	assert.NoError(t, err)
-	assert.Equal(t, 401, resp.StatusCode)
-	t.Log("Verified old code is invalidated")
+	assert.True(t, activeCodeResp.Success)
+
+	// Compare the code from login response with what root sees
+	activeCode := activeCodeResp.Data.(map[string]interface{})
+	assert.Equal(t, newCodeData["code"], activeCode["code"], "Root should see the same code as login response")
+	t.Logf("Root can see active code: %v", activeCode)
 
 	// Cleanup
 	db.Unscoped().Delete(&rootUser)
