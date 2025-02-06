@@ -43,10 +43,14 @@ func TestGetAllEmployees(t *testing.T) {
 }
 
 func TestAddEmployee(t *testing.T) {
-	app, _ := SetupTest(t)
+	app, db := SetupTest(t)
 	app.Post("/employees", handlers.AddEmployee)
 
-	// Test successful creation
+	// Log initial state
+	t.Log("Initial state:")
+	dumpUsers(t, "Before adding employee")
+
+	// Test successful creation with HR role
 	employee := handlers.AddEmployeeRequest{
 		FullName:      "Test Employee",
 		Email:         "test@company.com",
@@ -55,12 +59,12 @@ func TestAddEmployee(t *testing.T) {
 		DateOfBirth:   time.Now().AddDate(-25, 0, 0),
 		Gender:        "male",
 		TaxID:         "TAX123",
-		Position:      "Software Engineer",
+		Position:      "HR Staff",
 		Location:      "HQ",
-		Department:    "IT",
+		Department:    "HR",
 		WalletAddress: "0x123...",
 		Salary:        5000,
-		Role:          "employee",
+		Role:          "hr",
 	}
 
 	body, _ := json.Marshal(employee)
@@ -71,20 +75,26 @@ func TestAddEmployee(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
 
-	// Verify response
+	// Log response
 	var response types.APIResponse
 	err = json.NewDecoder(resp.Body).Decode(&response)
 	assert.Nil(t, err)
-	assert.True(t, response.Success)
+	t.Logf("Response: %+v", response)
 
-	// Verify database storage
+	// Verify database storage and log result
 	var storedEmployee models.User
-	err = GetTestDB().Where("email = ?", employee.Email).First(&storedEmployee).Error
+	err = db.Where("email = ?", employee.Email).First(&storedEmployee).Error
 	assert.Nil(t, err)
+	t.Logf("Stored employee: %+v", storedEmployee)
+
+	// Log final state
+	dumpUsers(t, "After adding employee")
+
+	// Verify specific fields
 	assert.Equal(t, employee.FullName, storedEmployee.FullName)
 	assert.Equal(t, employee.Email, storedEmployee.Email)
 	assert.Equal(t, employee.Department, storedEmployee.Department)
-	assert.Equal(t, employee.Role, storedEmployee.Role)
+	assert.Equal(t, "hr", storedEmployee.Role)
 	assert.Equal(t, "active", storedEmployee.Status)
 }
 

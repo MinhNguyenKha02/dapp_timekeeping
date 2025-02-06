@@ -25,7 +25,6 @@ type User struct {
 	OnboardDate        time.Time    `json:"onboard_date"`
 	Role               string       `gorm:"type:text;not null;default:'employee'" json:"role"`
 	Department         string       `gorm:"type:text;default:''" json:"department"`
-	ReferralCode       string       `json:"referral_code,omitempty"`
 	WalletAddress      string       `gorm:"type:text;default:''" json:"wallet_address"`
 	Salary             float64      `gorm:"default:0" json:"salary"`
 	LeaveBalance       int          `gorm:"default:0" json:"leave_balance"`

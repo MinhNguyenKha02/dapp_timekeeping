@@ -26,7 +26,7 @@ type AddEmployeeRequest struct {
 	Department    string    `json:"department" validate:"required"`
 	WalletAddress string    `json:"wallet_address" validate:"required"`
 	Salary        float64   `json:"salary" validate:"required,gt=0"`
-	Role          string    `json:"role" validate:"required,oneof=employee hr_manager accountant"`
+	Role          string    `json:"role" validate:"required,oneof=employee hr hr_manager accountant"`
 }
 
 func GetAllEmployees(c *fiber.Ctx) error {
