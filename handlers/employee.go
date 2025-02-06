@@ -41,8 +41,12 @@ type UpdateEmployeeRequest struct {
 
 // EmployeeFilters represents the available filter options
 type EmployeeFilters struct {
-	Department string `query:"department"`
-	Status     string `query:"status"` // leave_with_permission, leave_without_permission, late, resign
+	Department  string  `query:"department"`
+	Status      string  `query:"status"` // leave_with_permission, leave_without_permission, late, resign
+	SalaryFrom  float64 `query:"salary_from"`
+	SalaryTo    float64 `query:"salary_to"`
+	OnboardFrom string  `query:"onboard_from"` // Format: YYYY-MM-DD
+	OnboardTo   string  `query:"onboard_to"`   // Format: YYYY-MM-DD
 }
 
 func GetAllEmployees(c *fiber.Ctx) error {
@@ -59,6 +63,22 @@ func GetAllEmployees(c *fiber.Ctx) error {
 	// Apply department filter
 	if filters.Department != "" {
 		query = query.Where("department = ?", filters.Department)
+	}
+
+	// Apply salary range filter
+	if filters.SalaryFrom > 0 {
+		query = query.Where("salary >= ?", filters.SalaryFrom)
+	}
+	if filters.SalaryTo > 0 {
+		query = query.Where("salary <= ?", filters.SalaryTo)
+	}
+
+	// Apply onboard date range filter
+	if filters.OnboardFrom != "" {
+		query = query.Where("DATE(onboard_date) >= ?", filters.OnboardFrom)
+	}
+	if filters.OnboardTo != "" {
+		query = query.Where("DATE(onboard_date) <= ?", filters.OnboardTo)
 	}
 
 	// Apply status filter

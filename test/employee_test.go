@@ -450,6 +450,26 @@ func TestGetEmployeesWithFilters(t *testing.T) {
 			filter:        "status=leave_with_permission",
 			expectedCount: 1,
 		},
+		{
+			name:          "Filter by salary range",
+			filter:        "salary_from=4000&salary_to=5000",
+			expectedCount: 2,
+		},
+		{
+			name:          "Filter by onboard date range",
+			filter:        "onboard_from=2023-01-01&onboard_to=2024-12-31",
+			expectedCount: 2,
+		},
+		{
+			name:          "Filter by department and salary",
+			filter:        "department=IT&salary_from=4500",
+			expectedCount: 1,
+		},
+		{
+			name:          "Filter by multiple criteria",
+			filter:        "department=IT&salary_from=4000&onboard_from=2023-01-01",
+			expectedCount: 1,
+		},
 	}
 
 	for _, tc := range testCases {
