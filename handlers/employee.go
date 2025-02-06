@@ -39,9 +39,48 @@ type UpdateEmployeeRequest struct {
 	Salary      float64 `json:"salary"`
 }
 
+// EmployeeFilters represents the available filter options
+type EmployeeFilters struct {
+	Department string `query:"department"`
+	Status     string `query:"status"` // leave_with_permission, leave_without_permission, late, resign
+}
+
 func GetAllEmployees(c *fiber.Ctx) error {
+	var filters EmployeeFilters
+	if err := c.QueryParser(&filters); err != nil {
+		return c.Status(400).JSON(types.APIResponse{
+			Success: false,
+			Error:   "Invalid filter parameters",
+		})
+	}
+
+	query := DB.Model(&models.User{})
+
+	// Apply department filter
+	if filters.Department != "" {
+		query = query.Where("department = ?", filters.Department)
+	}
+
+	// Apply status filter
+	if filters.Status != "" {
+		today := time.Now().Format("2006-01-02")
+		switch filters.Status {
+		case "leave_with_permission":
+			query = query.Joins("JOIN absences ON users.id = absences.user_id").
+				Where("absences.type = 'with_permission' AND absences.status = 'approved' AND ? BETWEEN DATE(absences.start_date) AND DATE(absences.end_date)", today)
+		case "leave_without_permission":
+			query = query.Joins("JOIN absences ON users.id = absences.user_id").
+				Where("absences.type = 'without_permission' AND ? BETWEEN DATE(absences.start_date) AND DATE(absences.end_date)", today)
+		case "late":
+			query = query.Joins("JOIN attendances ON users.id = attendances.user_id").
+				Where("DATE(attendances.check_in_time) = ? AND attendances.is_late = true", today)
+		case "resign":
+			query = query.Where("users.status = 'left_company'")
+		}
+	}
+
 	var employees []models.User
-	if err := DB.Find(&employees).Error; err != nil {
+	if err := query.Find(&employees).Error; err != nil {
 		utils.Logger.Error("Failed to fetch employees", zap.Error(err))
 		return c.Status(500).JSON(types.APIResponse{
 			Success: false,

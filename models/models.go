@@ -85,6 +85,7 @@ type Attendance struct {
 	CheckInTime  time.Time `json:"check_in_time"`
 	CheckOutTime time.Time `json:"check_out_time"`
 	ExpectedTime time.Time `json:"expected_time"`
+	IsLate       bool      `json:"is_late"`
 }
 
 type Absence struct {
@@ -92,6 +93,8 @@ type Absence struct {
 	UserID      string     `gorm:"type:text;references:users(id);not null" json:"user_id"`
 	User        User       `gorm:"foreignKey:UserID;references:ID"`
 	Date        time.Time  `gorm:"not null" json:"date"`
+	StartDate   time.Time  `gorm:"not null" json:"start_date"`
+	EndDate     time.Time  `gorm:"not null" json:"end_date"`
 	Type        string     `gorm:"type:text;not null;check:type IN ('with_permission','without_permission','resign')" json:"type"`
 	Reason      string     `gorm:"type:text;not null" json:"reason"`
 	Status      string     `gorm:"type:text;not null;default:'pending';check:status IN ('pending','approved','rejected')" json:"status"`
