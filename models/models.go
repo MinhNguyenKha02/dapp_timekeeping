@@ -1,9 +1,11 @@
 package models
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type User struct {
@@ -83,21 +85,55 @@ type Attendance struct {
 	User         User      `gorm:"foreignKey:UserID"`
 	CheckInTime  time.Time `json:"check_in_time"`
 	CheckOutTime time.Time `json:"check_out_time"`
+	ExpectedTime time.Time `json:"expected_time"`
 }
 
 type Absence struct {
-	ID          string `gorm:"type:text;primary_key" json:"id"`
-	UserID      string `gorm:"type:text;references:users(id)" json:"user_id"`
-	User        User   `gorm:"foreignKey:UserID;references:ID"`
-	Date        time.Time
-	Type        string
-	Reason      string
-	Status      string
-	ProcessedBy string `gorm:"type:text;references:users(id)" json:"processed_by"`
-	Processor   User   `gorm:"foreignKey:ProcessedBy;references:ID"`
-	ProcessedAt time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          string     `gorm:"type:text;primary_key" json:"id"`
+	UserID      string     `gorm:"type:text;references:users(id);not null" json:"user_id"`
+	User        User       `gorm:"foreignKey:UserID;references:ID"`
+	Date        time.Time  `gorm:"not null" json:"date"`
+	Type        string     `gorm:"type:text;not null;check:type IN ('with_permission','without_permission','resign')" json:"type"`
+	Reason      string     `gorm:"type:text;not null" json:"reason"`
+	Status      string     `gorm:"type:text;not null;default:'pending';check:status IN ('pending','approved','rejected')" json:"status"`
+	ProcessedBy *string    `gorm:"type:text;references:users(id)" json:"processed_by"`
+	Processor   User       `gorm:"foreignKey:ProcessedBy;references:ID"`
+	ProcessedAt *time.Time `json:"processed_at"`
+	CreatedAt   time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"not null" json:"updated_at"`
+}
+
+// BeforeSave hook to validate ProcessedBy and ProcessedAt
+func (a *Absence) BeforeSave(tx *gorm.DB) error {
+	// Validate required fields
+	if a.UserID == "" {
+		return errors.New("user ID is required")
+	}
+	if a.Type == "" {
+		return errors.New("type is required")
+	}
+	if a.Reason == "" {
+		return errors.New("reason is required")
+	}
+
+	// Validate ProcessedBy for approved/rejected status
+	if a.Status == "approved" || a.Status == "rejected" {
+		if a.ProcessedBy == nil {
+			return errors.New("processed_by is required for approved/rejected absences")
+		}
+		if a.ProcessedAt == nil {
+			now := time.Now()
+			a.ProcessedAt = &now
+		}
+	}
+
+	// Clear processor fields for pending status
+	if a.Status == "pending" {
+		a.ProcessedBy = nil
+		a.ProcessedAt = nil
+	}
+
+	return nil
 }
 
 type UserPermission struct {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"dapp_timekeeping/models"
 	"dapp_timekeeping/types"
 	"dapp_timekeeping/utils"
 	"time"
@@ -19,6 +20,25 @@ type AbsenceResponse struct {
 	Department  string     `json:"department"`
 	ProcessedBy *string    `json:"processed_by,omitempty"`
 	ProcessedAt *time.Time `json:"processed_at,omitempty"`
+}
+
+// Statistics response structure
+type EmployeeStatistics struct {
+	LeaveStats struct {
+		WithPermission    int `json:"with_permission"`
+		WithoutPermission int `json:"without_permission"`
+		PendingLeaves     int `json:"pending_leaves"`
+	} `json:"leave_stats"`
+	ResignStats struct {
+		Approved int `json:"approved"`
+		Pending  int `json:"pending"`
+		Total    int `json:"total"`
+	} `json:"resign_stats"`
+	LateStats struct {
+		TotalIncidents  int     `json:"total_incidents"`
+		UniqueEmployees int     `json:"unique_employees"`
+		AverageMinutes  float64 `json:"average_minutes"`
+	} `json:"late_stats"`
 }
 
 func GetAbsences(c *fiber.Ctx) error {
@@ -114,5 +134,44 @@ func GetAbsences(c *fiber.Ctx) error {
 	return c.JSON(types.APIResponse{
 		Success: true,
 		Data:    response,
+	})
+}
+
+// GetEmployeeStatistics returns statistics for root user
+func GetEmployeeStatistics(c *fiber.Ctx) error {
+	var stats EmployeeStatistics
+
+	// Get leave statistics from absence table
+	DB.Model(&models.Absence{}).
+		Select(`
+			COUNT(CASE WHEN type = 'with_permission' AND status = 'approved' THEN 1 END) as with_permission,
+			COUNT(CASE WHEN type = 'without_permission' THEN 1 END) as without_permission,
+			COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_leaves
+		`).
+		Scan(&stats.LeaveStats)
+
+	// Get resign statistics from absence table
+	DB.Table("absences").
+		Select(`
+			COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved,
+			COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+			COUNT(*) as total
+		`).
+		Where("type = 'resign'").
+		Scan(&stats.ResignStats)
+
+	// Get late statistics from attendance table
+	DB.Table("attendances").
+		Select(`
+			COUNT(*) as total_incidents,
+			COUNT(DISTINCT user_id) as unique_employees,
+			AVG((julianday(check_in_time) - julianday(expected_time)) * 24 * 60) as average_minutes
+		`).
+		Where("check_in_time > expected_time").
+		Scan(&stats.LateStats)
+
+	return c.JSON(types.APIResponse{
+		Success: true,
+		Data:    stats,
 	})
 }

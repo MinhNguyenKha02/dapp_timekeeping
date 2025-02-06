@@ -59,7 +59,6 @@ func init() {
 func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
 	// Drop existing tables first
 	testDB.Migrator().DropTable(
-		"uuid_table",
 		&models.UserPermission{},
 		&models.Absence{},
 		&models.Attendance{},
@@ -73,9 +72,9 @@ func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
 	// Then create tables in correct order
 	err := testDB.AutoMigrate(
 		&models.User{},       // Users first
-		&models.Permission{}, // Then independent tables
+		&models.Permission{}, // Independent tables
 		&models.Department{},
-		&models.Absence{}, // Then tables with foreign keys
+		&models.Absence{}, // Tables with foreign keys
 		&models.Attendance{},
 		&models.UserPermission{},
 		&models.PermissionGrant{},
