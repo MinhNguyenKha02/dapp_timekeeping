@@ -57,6 +57,13 @@ type EmployeeTimeStats struct {
 	AvgCheckOut  string `json:"avg_check_out"` // Time format HH:MM:SS
 }
 
+type EmployeeWorkHoursStats struct {
+	Department   string `json:"department"`
+	EmployeeID   string `json:"employee_id"`
+	EmployeeName string `json:"employee_name"`
+	WorkHours    string `json:"work_hours"` // Format: HH:MM:SS
+}
+
 func GetAllEmployees(c *fiber.Ctx) error {
 	var filters EmployeeFilters
 	if err := c.QueryParser(&filters); err != nil {
@@ -334,6 +341,61 @@ func GetEmployeeTimeStats(c *fiber.Ctx) error {
 
 	if err := DB.Raw(query).Scan(&stats).Error; err != nil {
 		utils.Logger.Error("Failed to fetch employee stats", zap.Error(err))
+		return c.Status(500).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrDatabaseError,
+		})
+	}
+
+	return c.JSON(types.APIResponse{
+		Success: true,
+		Data:    stats,
+	})
+}
+
+func GetEmployeeWorkHoursRanking(c *fiber.Ctx) error {
+	var stats []EmployeeWorkHoursStats
+
+	query := `
+		WITH time_seconds AS (
+			SELECT 
+				u.department,
+				u.id as employee_id,
+				u.full_name as employee_name,
+				-- Get actual work duration in seconds
+				(
+					strftime('%s', check_out_time) - 
+					strftime('%s', check_in_time)
+				) as work_duration_seconds,
+				-- Calculate late penalty if any
+				CASE WHEN is_late THEN
+					(
+						strftime('%s', check_in_time) - 
+						strftime('%s', expected_time)
+					)
+				ELSE 0 
+				END as late_duration_seconds
+			FROM users u
+			LEFT JOIN attendances a ON u.id = a.user_id
+			WHERE u.status = 'active'
+		)
+		SELECT 
+			department,
+			employee_id,
+			employee_name,
+			-- Sum total work hours (not average)
+			printf('%02d:%02d:%02d',
+				sum(work_duration_seconds - late_duration_seconds) / 3600,
+				(sum(work_duration_seconds - late_duration_seconds) % 3600) / 60,
+				sum(work_duration_seconds - late_duration_seconds) % 60
+			) as work_hours
+		FROM time_seconds
+		GROUP BY department, employee_id, employee_name
+		ORDER BY sum(work_duration_seconds - late_duration_seconds) DESC
+	`
+
+	if err := DB.Raw(query).Scan(&stats).Error; err != nil {
+		utils.Logger.Error("Failed to fetch work hours ranking", zap.Error(err))
 		return c.Status(500).JSON(types.APIResponse{
 			Success: false,
 			Error:   types.ErrDatabaseError,

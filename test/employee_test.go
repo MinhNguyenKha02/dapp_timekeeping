@@ -723,3 +723,222 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 		db.Unscoped().Delete(&emp)
 	}
 }
+
+func TestGetEmployeeWorkHoursRanking(t *testing.T) {
+	app, db := SetupTest(t)
+	app.Get("/employee-work-hours", handlers.GetEmployeeWorkHoursRanking)
+
+	// Create test employees with complete details
+	employees := []models.User{
+			{
+					ID:                uuid.New().String(),
+					FullName:          "IT Employee 1",
+					Email:             "it1@company.com",
+					PhoneNumber:       "+1234567890",
+					Address:           "123 IT St",
+					DateOfBirth:       time.Now().AddDate(-30, 0, 0),
+					Gender:            "male",
+					TaxID:             "TAX123",
+					HealthInsuranceID: "HI123",
+					SocialInsuranceID: "SI123",
+					Position:          "Developer",
+					Location:          "HQ",
+					Department:        "IT",
+					WalletAddress:     "0xit1...",
+					Salary:            5000,
+					Role:              "employee",
+					Status:            "active",
+					OnboardDate:       time.Now().AddDate(0, -6, 0),
+					LeaveBalance:      20,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+			},
+			{
+					ID:                uuid.New().String(),
+					FullName:          "IT Employee 2",
+					Email:             "it2@company.com",
+					PhoneNumber:       "+1234567891",
+					Address:           "124 IT St",
+					DateOfBirth:       time.Now().AddDate(-28, 0, 0),
+					Gender:            "female",
+					TaxID:             "TAX124",
+					HealthInsuranceID: "HI124",
+					SocialInsuranceID: "SI124",
+					Position:          "Senior Developer",
+					Location:          "HQ",
+					Department:        "IT",
+					WalletAddress:     "0xit2...",
+					Salary:            6000,
+					Role:              "employee",
+					Status:            "active",
+					OnboardDate:       time.Now().AddDate(0, -3, 0),
+					LeaveBalance:      20,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+			},
+			{
+					ID:                uuid.New().String(),
+					FullName:          "HR Employee",
+					Email:             "hr@company.com",
+					PhoneNumber:       "+1234567892",
+					Address:           "125 HR St",
+					DateOfBirth:       time.Now().AddDate(-35, 0, 0),
+					Gender:            "female",
+					TaxID:             "TAX125",
+					HealthInsuranceID: "HI125",
+					SocialInsuranceID: "SI125",
+					Position:          "HR Manager",
+					Location:          "HQ",
+					Department:        "HR",
+					WalletAddress:     "0xhr...",
+					Salary:            5500,
+					Role:              "hr",
+					Status:            "active",
+					OnboardDate:       time.Now().AddDate(-1, 0, 0),
+					LeaveBalance:      20,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
+			},
+	}
+	for _, emp := range employees {
+			db.Create(&emp)
+	}
+
+	// Base time for consistent testing
+	baseTime := time.Date(2024, 2, 1, 9, 0, 0, 0, time.UTC) // Expected start: 09:00:00
+
+	attendances := []models.Attendance{
+			// IT Employee 1 - Regular hours, no late
+			{
+					ID:           uuid.New().String(),
+					UserID:       employees[0].ID,
+					CheckInTime:  baseTime,                                    // 09:00:00
+					CheckOutTime: baseTime.Add(9 * time.Hour),                // 18:00:00
+					ExpectedTime: baseTime,
+					IsLate:       false,
+					// Work duration = 9h
+					// No late penalty
+					// Effective = 9h
+			},
+			{
+					ID:           uuid.New().String(),
+					UserID:       employees[0].ID,
+					CheckInTime:  baseTime.Add(5 * time.Minute),              // 09:05:00
+					CheckOutTime: baseTime.Add(9*time.Hour + 5*time.Minute),  // 18:05:00
+					ExpectedTime: baseTime,
+					IsLate:       true,
+					// Work duration = 9h
+					// Late penalty = 5m
+					// Effective = 8h 55m
+			},
+
+			// IT Employee 2 - Late but works extra
+			{
+					ID:           uuid.New().String(),
+					UserID:       employees[1].ID,
+					CheckInTime:  baseTime.Add(30 * time.Minute),             // 09:30:00
+					CheckOutTime: baseTime.Add(10 * time.Hour),               // 19:00:00
+					ExpectedTime: baseTime,
+					IsLate:       true,
+					// Work duration = 9h 30m
+					// Late penalty = 30m
+					// Effective = 9h
+			},
+			{
+					ID:           uuid.New().String(),
+					UserID:       employees[1].ID,
+					CheckInTime:  baseTime.Add(15 * time.Minute),             // 09:15:00
+					CheckOutTime: baseTime.Add(9*time.Hour + 45*time.Minute), // 18:45:00
+					ExpectedTime: baseTime,
+					IsLate:       true,
+					// Work duration = 9h 30m
+					// Late penalty = 15m
+					// Effective = 9h 15m
+			},
+
+			// HR Employee - Early bird
+			{
+					ID:           uuid.New().String(),
+					UserID:       employees[2].ID,
+					CheckInTime:  baseTime.Add(-30 * time.Minute),            // 08:30:00
+					CheckOutTime: baseTime.Add(8 * time.Hour),                // 17:00:00
+					ExpectedTime: baseTime,
+					IsLate:       false,
+					// Work duration = 8h 30m
+					// No late penalty
+					// Effective = 8h 30m
+			},
+			{
+					ID:           uuid.New().String(),
+					UserID:       employees[2].ID,
+					CheckInTime:  baseTime.Add(-15 * time.Minute),            // 08:45:00
+					CheckOutTime: baseTime.Add(8*time.Hour + 15*time.Minute), // 17:15:00
+					ExpectedTime: baseTime,
+					IsLate:       false,
+					// Work duration = 8h 30m
+					// No late penalty
+					// Effective = 8h 30m
+			},
+	}
+	for _, att := range attendances {
+			db.Create(&att)
+	}
+
+	// Test the endpoint
+	req := httptest.NewRequest("GET", "/employee-work-hours", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	var response types.APIResponse
+	err = json.NewDecoder(resp.Body).Decode(&response)
+	assert.NoError(t, err)
+
+	stats := response.Data.([]interface{})
+
+	// Log results for debugging
+	t.Log("\n=== Employee Work Hours Ranking ===")
+	for _, stat := range stats {
+			s := stat.(map[string]interface{})
+			t.Logf("Employee: %s (Dept: %s)", s["employee_name"], s["department"])
+			t.Logf("  Work Hours: %s", s["work_hours"])
+	}
+
+	// Expected total work hours:
+	// IT Employee 2:
+	// Day 1: 9h 30m - 30m penalty = 9h
+	// Day 2: 9h 30m - 15m penalty = 9h 15m
+	// Total = 18h 15m
+
+	// IT Employee 1:
+	// Day 1: 9h - 0m penalty = 9h
+	// Day 2: 9h - 5m penalty = 8h 55m
+	// Total = 17h 55m
+
+	// HR Employee:
+	// Day 1: 8h 30m - 0m penalty = 8h 30m
+	// Day 2: 8h 30m - 0m penalty = 8h 30m
+	// Total = 17h 00m
+
+	assert.Equal(t, 3, len(stats), "Should have 3 employees")
+
+	firstEmployee := stats[0].(map[string]interface{})
+	assert.Equal(t, "IT Employee 2", firstEmployee["employee_name"], "IT Employee 2 should have most hours")
+	assert.Equal(t, "18:15:00", firstEmployee["work_hours"], "Total should be 18h 15m")
+
+	secondEmployee := stats[1].(map[string]interface{})
+	assert.Equal(t, "IT Employee 1", secondEmployee["employee_name"])
+	assert.Equal(t, "17:55:00", secondEmployee["work_hours"], "Total should be 17h 55m")
+
+	thirdEmployee := stats[2].(map[string]interface{})
+	assert.Equal(t, "HR Employee", thirdEmployee["employee_name"])
+	assert.Equal(t, "17:00:00", thirdEmployee["work_hours"], "Total should be 17h 00m")
+
+	// Cleanup
+	for _, att := range attendances {
+			db.Unscoped().Delete(&att)
+	}
+	for _, emp := range employees {
+			db.Unscoped().Delete(&emp)
+	}
+}
