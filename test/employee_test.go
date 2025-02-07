@@ -507,3 +507,219 @@ func TestGetEmployeesWithFilters(t *testing.T) {
 		db.Unscoped().Delete(&emp)
 	}
 }
+
+func TestGetEmployeeTimeStats(t *testing.T) {
+	app, db := SetupTest(t)
+	app.Get("/employee-stats", handlers.GetEmployeeTimeStats)
+
+	// Create test employees in different departments
+	employees := []models.User{
+		{
+			ID:                uuid.New().String(),
+			FullName:          "IT Employee 1",
+			Email:             "it1@company.com",
+			PhoneNumber:       "+1234567890",
+			Address:           "123 IT St",
+			DateOfBirth:       time.Now().AddDate(-30, 0, 0),
+			Gender:            "male",
+			TaxID:             "TAX123",
+			HealthInsuranceID: "HI123",
+			SocialInsuranceID: "SI123",
+			Position:          "Developer",
+			Location:          "HQ",
+			Department:        "IT",
+			WalletAddress:     "0xit1...",
+			Salary:            5000,
+			Role:              "employee",
+			Status:            "active",
+			OnboardDate:       time.Now().AddDate(0, -6, 0),
+			LeaveBalance:      20,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		},
+		{
+			ID:                uuid.New().String(),
+			FullName:          "IT Employee 2",
+			Email:             "it2@company.com",
+			PhoneNumber:       "+1234567891",
+			Address:           "124 IT St",
+			DateOfBirth:       time.Now().AddDate(-28, 0, 0),
+			Gender:            "female",
+			TaxID:             "TAX124",
+			HealthInsuranceID: "HI124",
+			SocialInsuranceID: "SI124",
+			Position:          "Senior Developer",
+			Location:          "HQ",
+			Department:        "IT",
+			WalletAddress:     "0xit2...",
+			Salary:            6000,
+			Role:              "employee",
+			Status:            "active",
+			OnboardDate:       time.Now().AddDate(0, -3, 0),
+			LeaveBalance:      20,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		},
+		{
+			ID:                uuid.New().String(),
+			FullName:          "HR Employee",
+			Email:             "hr@company.com",
+			PhoneNumber:       "+1234567892",
+			Address:           "125 HR St",
+			DateOfBirth:       time.Now().AddDate(-35, 0, 0),
+			Gender:            "female",
+			TaxID:             "TAX125",
+			HealthInsuranceID: "HI125",
+			SocialInsuranceID: "SI125",
+			Position:          "HR Manager",
+			Location:          "HQ",
+			Department:        "HR",
+			WalletAddress:     "0xhr...",
+			Salary:            5500,
+			Role:              "hr",
+			Status:            "active",
+			OnboardDate:       time.Now().AddDate(-1, 0, 0),
+			LeaveBalance:      20,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		},
+	}
+	for _, emp := range employees {
+		db.Create(&emp)
+	}
+
+	// Use UTC time for consistency with precise seconds
+	baseTime := time.Date(2024, 2, 1, 9, 0, 0, 0, time.UTC) // 09:00:00 exactly
+
+	attendances := []models.Attendance{
+		// IT Employee 1 - varying check-in/out times
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[0].ID,
+			CheckInTime:  baseTime.Add(-15*time.Minute - 30*time.Second), // 08:44:30
+			CheckOutTime: baseTime.Add(8*time.Hour + 15*time.Second),     // 17:00:15
+			ExpectedTime: baseTime,
+			IsLate:       false,
+		},
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[0].ID,
+			CheckInTime:  baseTime.Add(15*time.Minute + 45*time.Second), // 09:15:45
+			CheckOutTime: baseTime.Add(9*time.Hour + 30*time.Second),    // 18:00:30
+			ExpectedTime: baseTime,
+			IsLate:       true,
+		},
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[0].ID,
+			CheckInTime:  baseTime.Add(20 * time.Second),                              // 09:00:20
+			CheckOutTime: baseTime.Add(8*time.Hour + 30*time.Minute + 15*time.Second), // 17:30:15
+			ExpectedTime: baseTime,
+			IsLate:       false,
+		},
+
+		// IT Employee 2 - consistent but late
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[1].ID,
+			CheckInTime:  baseTime.Add(30*time.Minute + 15*time.Second), // 09:30:15
+			CheckOutTime: baseTime.Add(9*time.Hour + 45*time.Second),    // 18:00:45
+			ExpectedTime: baseTime,
+			IsLate:       true,
+		},
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[1].ID,
+			CheckInTime:  baseTime.Add(25*time.Minute + 45*time.Second),               // 09:25:45
+			CheckOutTime: baseTime.Add(8*time.Hour + 45*time.Minute + 30*time.Second), // 17:45:30
+			ExpectedTime: baseTime,
+			IsLate:       true,
+		},
+
+		// HR Employee - early bird
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[2].ID,
+			CheckInTime:  baseTime.Add(-45*time.Minute - 15*time.Second), // 08:14:45
+			CheckOutTime: baseTime.Add(7*time.Hour + 20*time.Second),     // 16:00:20
+			ExpectedTime: baseTime,
+			IsLate:       false,
+		},
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[2].ID,
+			CheckInTime:  baseTime.Add(-30*time.Minute - 45*time.Second),              // 08:29:15
+			CheckOutTime: baseTime.Add(7*time.Hour + 30*time.Minute + 40*time.Second), // 16:30:40
+			ExpectedTime: baseTime,
+			IsLate:       false,
+		},
+	}
+	for _, att := range attendances {
+		db.Create(&att)
+	}
+
+	// Log initial test data
+	t.Log("=== Test Setup ===")
+	for _, emp := range employees {
+		t.Logf("Created employee: ID=%s, Name=%s, Dept=%s",
+			emp.ID, emp.FullName, emp.Department)
+	}
+
+	t.Log("\n=== Attendance Records ===")
+	for _, att := range attendances {
+		t.Logf("Created attendance: UserID=%s, CheckIn=%s, CheckOut=%s, IsLate=%v",
+			att.UserID, att.CheckInTime, att.CheckOutTime, att.IsLate)
+	}
+
+	// Test the stats endpoint
+	req := httptest.NewRequest("GET", "/employee-stats", nil)
+	resp, err := app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	var response types.APIResponse
+	err = json.NewDecoder(resp.Body).Decode(&response)
+	assert.NoError(t, err)
+
+	stats := response.Data.([]interface{})
+
+	// Log the stats results in a clear format
+	t.Log("\n=== Department Average Time Stats ===")
+
+	// Group stats by department for better readability
+	departments := make(map[string][]map[string]interface{})
+	for _, stat := range stats {
+		s := stat.(map[string]interface{})
+		dept := s["department"].(string)
+		departments[dept] = append(departments[dept], s)
+	}
+
+	// Print stats grouped by department
+	for dept, empStats := range departments {
+		t.Logf("\nDepartment: %s", dept)
+		for _, s := range empStats {
+			t.Logf("  Employee: %s", s["employee_name"])
+			t.Logf("    Avg Check-in:  %s", s["avg_check_in"])
+			t.Logf("    Avg Check-out: %s", s["avg_check_out"])
+		}
+	}
+
+	// Basic validation
+	assert.Greater(t, len(stats), 0, "Should have at least one stat record")
+	for _, stat := range stats {
+		s := stat.(map[string]interface{})
+		// Verify required fields exist
+		assert.NotEmpty(t, s["department"], "Department should not be empty")
+		assert.NotEmpty(t, s["employee_name"], "Employee name should not be empty")
+		assert.NotEmpty(t, s["avg_check_in"], "Average check-in time should not be empty")
+		assert.NotEmpty(t, s["avg_check_out"], "Average check-out time should not be empty")
+	}
+
+	// Cleanup
+	for _, att := range attendances {
+		db.Unscoped().Delete(&att)
+	}
+	for _, emp := range employees {
+		db.Unscoped().Delete(&emp)
+	}
+}

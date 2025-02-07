@@ -49,6 +49,14 @@ type EmployeeFilters struct {
 	OnboardTo   string  `query:"onboard_to"`   // Format: YYYY-MM-DD
 }
 
+type EmployeeTimeStats struct {
+	Department   string `json:"department"`
+	EmployeeID   string `json:"employee_id"`
+	EmployeeName string `json:"employee_name"`
+	AvgCheckIn   string `json:"avg_check_in"`  // Time format HH:MM:SS
+	AvgCheckOut  string `json:"avg_check_out"` // Time format HH:MM:SS
+}
+
 func GetAllEmployees(c *fiber.Ctx) error {
 	var filters EmployeeFilters
 	if err := c.QueryParser(&filters); err != nil {
@@ -278,5 +286,62 @@ func DeleteEmployee(c *fiber.Ctx) error {
 	return c.JSON(types.APIResponse{
 		Success: true,
 		Message: "Employee deleted successfully",
+	})
+}
+
+func GetEmployeeTimeStats(c *fiber.Ctx) error {
+	var stats []EmployeeTimeStats
+
+	query := `
+		WITH time_seconds AS (
+			SELECT 
+				u.department,
+				u.id as employee_id,
+				u.full_name as employee_name,
+				-- Convert times to seconds and handle 24-hour format
+				(
+					cast(strftime('%H', check_in_time) as integer) * 3600 + 
+					cast(strftime('%M', check_in_time) as integer) * 60 + 
+					cast(strftime('%S', check_in_time) as integer)
+				) as seconds_since_midnight_in,
+				(
+					cast(strftime('%H', check_out_time) as integer) * 3600 + 
+					cast(strftime('%M', check_out_time) as integer) * 60 + 
+					cast(strftime('%S', check_out_time) as integer)
+				) as seconds_since_midnight_out
+			FROM users u
+			LEFT JOIN attendances a ON u.id = a.user_id
+			WHERE u.status = 'active'
+		)
+		SELECT 
+			department,
+			employee_id,
+			employee_name,
+			printf('%02d:%02d:%02d',
+				cast(round(avg(seconds_since_midnight_in)) / 3600 as integer),
+				cast(round(avg(seconds_since_midnight_in)) % 3600 / 60 as integer),
+				cast(round(avg(seconds_since_midnight_in)) % 60 as integer)
+			) as avg_check_in,
+			printf('%02d:%02d:%02d',
+				cast(round(avg(seconds_since_midnight_out)) / 3600 as integer),
+				cast(round(avg(seconds_since_midnight_out)) % 3600 / 60 as integer),
+				cast(round(avg(seconds_since_midnight_out)) % 60 as integer)
+			) as avg_check_out
+		FROM time_seconds
+		GROUP BY department, employee_id, employee_name
+		ORDER BY department, employee_name
+	`
+
+	if err := DB.Raw(query).Scan(&stats).Error; err != nil {
+		utils.Logger.Error("Failed to fetch employee stats", zap.Error(err))
+		return c.Status(500).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrDatabaseError,
+		})
+	}
+
+	return c.JSON(types.APIResponse{
+		Success: true,
+		Data:    stats,
 	})
 }

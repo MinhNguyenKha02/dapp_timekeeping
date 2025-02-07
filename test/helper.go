@@ -88,8 +88,10 @@ func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
 	schema, _ := testDB.Migrator().GetTables()
 	t.Logf("Database schema: %v", schema)
 
-	// Reset database
+	// Reset database and clear cache
 	ResetTestDB()
+	testDB.Exec("PRAGMA foreign_keys = ON")
+	testDB.Exec("VACUUM") // Clear SQLite cache
 
 	// Create fresh app instance
 	testApp = fiber.New()
@@ -99,15 +101,16 @@ func SetupTest(t *testing.T) (*fiber.App, *gorm.DB) {
 }
 
 func ResetTestDB() {
-	// Clear tables in correct order to respect foreign keys
-	testDB.Exec("DELETE FROM user_permissions")
-	testDB.Exec("DELETE FROM absences")
+	// Clear all data
 	testDB.Exec("DELETE FROM attendances")
-	testDB.Exec("DELETE FROM permission_grants")
-	testDB.Exec("DELETE FROM salary_approvals")
-	testDB.Exec("DELETE FROM departments")
-	testDB.Exec("DELETE FROM permissions")
-	testDB.Exec("DELETE FROM users") // Delete users last since other tables reference it
+	testDB.Exec("DELETE FROM users")
+
+	// Only reset sequence if table exists
+	var count int64
+	testDB.Raw("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'").Count(&count)
+	if count > 0 {
+		testDB.Exec("UPDATE sqlite_sequence SET seq = 0")
+	}
 }
 
 func GetTestDB() *gorm.DB {
