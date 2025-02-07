@@ -79,13 +79,15 @@ type SalaryApproval struct {
 }
 
 type Attendance struct {
-	ID           string    `gorm:"type:text;primary_key" json:"id"`
-	UserID       string    `gorm:"type:text" json:"user_id"`
-	User         User      `gorm:"foreignKey:UserID"`
-	CheckInTime  time.Time `json:"check_in_time"`
-	CheckOutTime time.Time `json:"check_out_time"`
-	ExpectedTime time.Time `json:"expected_time"`
-	IsLate       bool      `json:"is_late"`
+	ID           string    `json:"id" gorm:"primaryKey"`
+	UserID       string    `json:"user_id" gorm:"not null"`
+	CheckInTime  time.Time `json:"check_in_time"`  // Will be NULL by default
+	CheckOutTime time.Time `json:"check_out_time"` // Will be NULL by default
+	ExpectedTime time.Time `json:"expected_time" gorm:"not null"`
+	IsLate       bool      `json:"is_late" gorm:"default:false"`
+	CreatedAt    time.Time `json:"created_at" gorm:"not null"`
+	UpdatedAt    time.Time `json:"updated_at" gorm:"not null"`
+	User         User      `json:"-" gorm:"foreignKey:UserID"`
 }
 
 type Absence struct {

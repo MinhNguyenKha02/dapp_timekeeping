@@ -64,6 +64,14 @@ type EmployeeWorkHoursStats struct {
 	WorkHours    string `json:"work_hours"` // Format: HH:MM:SS
 }
 
+type CheckInRequest struct {
+	UserID string `json:"user_id" validate:"required"`
+}
+
+type CheckOutRequest struct {
+	UserID string `json:"user_id" validate:"required"`
+}
+
 func GetAllEmployees(c *fiber.Ctx) error {
 	var filters EmployeeFilters
 	if err := c.QueryParser(&filters); err != nil {
@@ -405,5 +413,123 @@ func GetEmployeeWorkHoursRanking(c *fiber.Ctx) error {
 	return c.JSON(types.APIResponse{
 		Success: true,
 		Data:    stats,
+	})
+}
+
+// CheckIn handles employee check-in
+func CheckIn(c *fiber.Ctx) error {
+	var req CheckInRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrInvalidInput,
+		})
+	}
+
+	// Get current time
+	now := time.Now()
+	today := now.Format("2006-01-02")
+
+	// Check if already checked in today
+	var existingAttendance models.Attendance
+	err := DB.Where("user_id = ? AND DATE(created_at) = ?", req.UserID, today).First(&existingAttendance).Error
+	if err == nil {
+		return c.Status(400).JSON(types.APIResponse{
+			Success: false,
+			Error:   "Already checked in today",
+		})
+	} else if err != gorm.ErrRecordNotFound { // Only log if it's an unexpected error
+		utils.Logger.Error("Failed to check existing attendance", zap.Error(err))
+		return c.Status(500).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrDatabaseError,
+		})
+	}
+
+	// Get expected time (e.g., 9:00 AM)
+	expectedTime := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
+
+	// Create new attendance record
+	attendance := models.Attendance{
+		ID:           uuid.New().String(),
+		UserID:       req.UserID,
+		CheckInTime:  now,
+		ExpectedTime: expectedTime,
+		IsLate:       now.After(expectedTime),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := DB.Create(&attendance).Error; err != nil {
+		utils.Logger.Error("Failed to create attendance record", zap.Error(err))
+		return c.Status(500).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrDatabaseError,
+		})
+	}
+
+	return c.JSON(types.APIResponse{
+		Success: true,
+		Message: "Check-in successful",
+		Data:    attendance,
+	})
+}
+
+// CheckOut handles employee check-out
+func CheckOut(c *fiber.Ctx) error {
+	var req CheckOutRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrInvalidInput,
+		})
+	}
+
+	// Get current time
+	now := time.Now()
+	today := now.Format("2006-01-02")
+
+	// Find today's attendance record
+	var attendance models.Attendance
+	err := DB.Where("user_id = ? AND DATE(created_at) = ?", req.UserID, today).First(&attendance).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// Don't log this expected case
+			return c.Status(400).JSON(types.APIResponse{
+				Success: false,
+				Error:   "No check-in record found for today",
+			})
+		}
+		utils.Logger.Error("Failed to find attendance record", zap.Error(err))
+		return c.Status(500).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrDatabaseError,
+		})
+	}
+
+	// Check if already checked out
+	if !attendance.CheckOutTime.IsZero() {
+		return c.Status(400).JSON(types.APIResponse{
+			Success: false,
+			Error:   "Already checked out today",
+		})
+	}
+
+	// Update check-out time
+	attendance.CheckOutTime = now
+	attendance.UpdatedAt = now
+
+	if err := DB.Save(&attendance).Error; err != nil {
+		utils.Logger.Error("Failed to update attendance record", zap.Error(err))
+		return c.Status(500).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrDatabaseError,
+		})
+	}
+
+	return c.JSON(types.APIResponse{
+		Success: true,
+		Message: "Check-out successful",
+		Data:    attendance,
 	})
 }

@@ -417,6 +417,8 @@ func TestGetEmployeesWithFilters(t *testing.T) {
 		CheckOutTime: time.Now().Add(8 * time.Hour),
 		ExpectedTime: time.Now().Add(-15 * time.Minute),
 		IsLate:       true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	db.Create(&lateAttendance)
 
@@ -600,6 +602,8 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			CheckOutTime: baseTime.Add(8*time.Hour + 15*time.Second),     // 17:00:15
 			ExpectedTime: baseTime,
 			IsLate:       false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		},
 		{
 			ID:           uuid.New().String(),
@@ -608,6 +612,8 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			CheckOutTime: baseTime.Add(9*time.Hour + 30*time.Second),    // 18:00:30
 			ExpectedTime: baseTime,
 			IsLate:       true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		},
 		{
 			ID:           uuid.New().String(),
@@ -616,6 +622,8 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			CheckOutTime: baseTime.Add(8*time.Hour + 30*time.Minute + 15*time.Second), // 17:30:15
 			ExpectedTime: baseTime,
 			IsLate:       false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		},
 
 		// IT Employee 2 - consistent but late
@@ -626,6 +634,8 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			CheckOutTime: baseTime.Add(9*time.Hour + 45*time.Second),    // 18:00:45
 			ExpectedTime: baseTime,
 			IsLate:       true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		},
 		{
 			ID:           uuid.New().String(),
@@ -634,6 +644,8 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			CheckOutTime: baseTime.Add(8*time.Hour + 45*time.Minute + 30*time.Second), // 17:45:30
 			ExpectedTime: baseTime,
 			IsLate:       true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		},
 
 		// HR Employee - early bird
@@ -644,6 +656,8 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			CheckOutTime: baseTime.Add(7*time.Hour + 20*time.Second),     // 16:00:20
 			ExpectedTime: baseTime,
 			IsLate:       false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		},
 		{
 			ID:           uuid.New().String(),
@@ -652,6 +666,8 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			CheckOutTime: baseTime.Add(7*time.Hour + 30*time.Minute + 40*time.Second), // 16:30:40
 			ExpectedTime: baseTime,
 			IsLate:       false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		},
 	}
 	for _, att := range attendances {
@@ -730,158 +746,170 @@ func TestGetEmployeeWorkHoursRanking(t *testing.T) {
 
 	// Create test employees with complete details
 	employees := []models.User{
-			{
-					ID:                uuid.New().String(),
-					FullName:          "IT Employee 1",
-					Email:             "it1@company.com",
-					PhoneNumber:       "+1234567890",
-					Address:           "123 IT St",
-					DateOfBirth:       time.Now().AddDate(-30, 0, 0),
-					Gender:            "male",
-					TaxID:             "TAX123",
-					HealthInsuranceID: "HI123",
-					SocialInsuranceID: "SI123",
-					Position:          "Developer",
-					Location:          "HQ",
-					Department:        "IT",
-					WalletAddress:     "0xit1...",
-					Salary:            5000,
-					Role:              "employee",
-					Status:            "active",
-					OnboardDate:       time.Now().AddDate(0, -6, 0),
-					LeaveBalance:      20,
-					CreatedAt:         time.Now(),
-					UpdatedAt:         time.Now(),
-			},
-			{
-					ID:                uuid.New().String(),
-					FullName:          "IT Employee 2",
-					Email:             "it2@company.com",
-					PhoneNumber:       "+1234567891",
-					Address:           "124 IT St",
-					DateOfBirth:       time.Now().AddDate(-28, 0, 0),
-					Gender:            "female",
-					TaxID:             "TAX124",
-					HealthInsuranceID: "HI124",
-					SocialInsuranceID: "SI124",
-					Position:          "Senior Developer",
-					Location:          "HQ",
-					Department:        "IT",
-					WalletAddress:     "0xit2...",
-					Salary:            6000,
-					Role:              "employee",
-					Status:            "active",
-					OnboardDate:       time.Now().AddDate(0, -3, 0),
-					LeaveBalance:      20,
-					CreatedAt:         time.Now(),
-					UpdatedAt:         time.Now(),
-			},
-			{
-					ID:                uuid.New().String(),
-					FullName:          "HR Employee",
-					Email:             "hr@company.com",
-					PhoneNumber:       "+1234567892",
-					Address:           "125 HR St",
-					DateOfBirth:       time.Now().AddDate(-35, 0, 0),
-					Gender:            "female",
-					TaxID:             "TAX125",
-					HealthInsuranceID: "HI125",
-					SocialInsuranceID: "SI125",
-					Position:          "HR Manager",
-					Location:          "HQ",
-					Department:        "HR",
-					WalletAddress:     "0xhr...",
-					Salary:            5500,
-					Role:              "hr",
-					Status:            "active",
-					OnboardDate:       time.Now().AddDate(-1, 0, 0),
-					LeaveBalance:      20,
-					CreatedAt:         time.Now(),
-					UpdatedAt:         time.Now(),
-			},
+		{
+			ID:                uuid.New().String(),
+			FullName:          "IT Employee 1",
+			Email:             "it1@company.com",
+			PhoneNumber:       "+1234567890",
+			Address:           "123 IT St",
+			DateOfBirth:       time.Now().AddDate(-30, 0, 0),
+			Gender:            "male",
+			TaxID:             "TAX123",
+			HealthInsuranceID: "HI123",
+			SocialInsuranceID: "SI123",
+			Position:          "Developer",
+			Location:          "HQ",
+			Department:        "IT",
+			WalletAddress:     "0xit1...",
+			Salary:            5000,
+			Role:              "employee",
+			Status:            "active",
+			OnboardDate:       time.Now().AddDate(0, -6, 0),
+			LeaveBalance:      20,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		},
+		{
+			ID:                uuid.New().String(),
+			FullName:          "IT Employee 2",
+			Email:             "it2@company.com",
+			PhoneNumber:       "+1234567891",
+			Address:           "124 IT St",
+			DateOfBirth:       time.Now().AddDate(-28, 0, 0),
+			Gender:            "female",
+			TaxID:             "TAX124",
+			HealthInsuranceID: "HI124",
+			SocialInsuranceID: "SI124",
+			Position:          "Senior Developer",
+			Location:          "HQ",
+			Department:        "IT",
+			WalletAddress:     "0xit2...",
+			Salary:            6000,
+			Role:              "employee",
+			Status:            "active",
+			OnboardDate:       time.Now().AddDate(0, -3, 0),
+			LeaveBalance:      20,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		},
+		{
+			ID:                uuid.New().String(),
+			FullName:          "HR Employee",
+			Email:             "hr@company.com",
+			PhoneNumber:       "+1234567892",
+			Address:           "125 HR St",
+			DateOfBirth:       time.Now().AddDate(-35, 0, 0),
+			Gender:            "female",
+			TaxID:             "TAX125",
+			HealthInsuranceID: "HI125",
+			SocialInsuranceID: "SI125",
+			Position:          "HR Manager",
+			Location:          "HQ",
+			Department:        "HR",
+			WalletAddress:     "0xhr...",
+			Salary:            5500,
+			Role:              "hr",
+			Status:            "active",
+			OnboardDate:       time.Now().AddDate(-1, 0, 0),
+			LeaveBalance:      20,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		},
 	}
 	for _, emp := range employees {
-			db.Create(&emp)
+		db.Create(&emp)
 	}
 
 	// Base time for consistent testing
 	baseTime := time.Date(2024, 2, 1, 9, 0, 0, 0, time.UTC) // Expected start: 09:00:00
 
 	attendances := []models.Attendance{
-			// IT Employee 1 - Regular hours, no late
-			{
-					ID:           uuid.New().String(),
-					UserID:       employees[0].ID,
-					CheckInTime:  baseTime,                                    // 09:00:00
-					CheckOutTime: baseTime.Add(9 * time.Hour),                // 18:00:00
-					ExpectedTime: baseTime,
-					IsLate:       false,
-					// Work duration = 9h
-					// No late penalty
-					// Effective = 9h
-			},
-			{
-					ID:           uuid.New().String(),
-					UserID:       employees[0].ID,
-					CheckInTime:  baseTime.Add(5 * time.Minute),              // 09:05:00
-					CheckOutTime: baseTime.Add(9*time.Hour + 5*time.Minute),  // 18:05:00
-					ExpectedTime: baseTime,
-					IsLate:       true,
-					// Work duration = 9h
-					// Late penalty = 5m
-					// Effective = 8h 55m
-			},
+		// IT Employee 1 - Regular hours, no late
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[0].ID,
+			CheckInTime:  baseTime,                    // 09:00:00
+			CheckOutTime: baseTime.Add(9 * time.Hour), // 18:00:00
+			ExpectedTime: baseTime,
+			IsLate:       false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			// Work duration = 9h
+			// No late penalty
+			// Effective = 9h
+		},
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[0].ID,
+			CheckInTime:  baseTime.Add(5 * time.Minute),             // 09:05:00
+			CheckOutTime: baseTime.Add(9*time.Hour + 5*time.Minute), // 18:05:00
+			ExpectedTime: baseTime,
+			IsLate:       true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			// Work duration = 9h
+			// Late penalty = 5m
+			// Effective = 8h 55m
+		},
 
-			// IT Employee 2 - Late but works extra
-			{
-					ID:           uuid.New().String(),
-					UserID:       employees[1].ID,
-					CheckInTime:  baseTime.Add(30 * time.Minute),             // 09:30:00
-					CheckOutTime: baseTime.Add(10 * time.Hour),               // 19:00:00
-					ExpectedTime: baseTime,
-					IsLate:       true,
-					// Work duration = 9h 30m
-					// Late penalty = 30m
-					// Effective = 9h
-			},
-			{
-					ID:           uuid.New().String(),
-					UserID:       employees[1].ID,
-					CheckInTime:  baseTime.Add(15 * time.Minute),             // 09:15:00
-					CheckOutTime: baseTime.Add(9*time.Hour + 45*time.Minute), // 18:45:00
-					ExpectedTime: baseTime,
-					IsLate:       true,
-					// Work duration = 9h 30m
-					// Late penalty = 15m
-					// Effective = 9h 15m
-			},
+		// IT Employee 2 - Late but works extra
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[1].ID,
+			CheckInTime:  baseTime.Add(30 * time.Minute), // 09:30:00
+			CheckOutTime: baseTime.Add(10 * time.Hour),   // 19:00:00
+			ExpectedTime: baseTime,
+			IsLate:       true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			// Work duration = 9h 30m
+			// Late penalty = 30m
+			// Effective = 9h
+		},
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[1].ID,
+			CheckInTime:  baseTime.Add(15 * time.Minute),             // 09:15:00
+			CheckOutTime: baseTime.Add(9*time.Hour + 45*time.Minute), // 18:45:00
+			ExpectedTime: baseTime,
+			IsLate:       true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			// Work duration = 9h 30m
+			// Late penalty = 15m
+			// Effective = 9h 15m
+		},
 
-			// HR Employee - Early bird
-			{
-					ID:           uuid.New().String(),
-					UserID:       employees[2].ID,
-					CheckInTime:  baseTime.Add(-30 * time.Minute),            // 08:30:00
-					CheckOutTime: baseTime.Add(8 * time.Hour),                // 17:00:00
-					ExpectedTime: baseTime,
-					IsLate:       false,
-					// Work duration = 8h 30m
-					// No late penalty
-					// Effective = 8h 30m
-			},
-			{
-					ID:           uuid.New().String(),
-					UserID:       employees[2].ID,
-					CheckInTime:  baseTime.Add(-15 * time.Minute),            // 08:45:00
-					CheckOutTime: baseTime.Add(8*time.Hour + 15*time.Minute), // 17:15:00
-					ExpectedTime: baseTime,
-					IsLate:       false,
-					// Work duration = 8h 30m
-					// No late penalty
-					// Effective = 8h 30m
-			},
+		// HR Employee - Early bird
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[2].ID,
+			CheckInTime:  baseTime.Add(-30 * time.Minute), // 08:30:00
+			CheckOutTime: baseTime.Add(8 * time.Hour),     // 17:00:00
+			ExpectedTime: baseTime,
+			IsLate:       false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			// Work duration = 8h 30m
+			// No late penalty
+			// Effective = 8h 30m
+		},
+		{
+			ID:           uuid.New().String(),
+			UserID:       employees[2].ID,
+			CheckInTime:  baseTime.Add(-15 * time.Minute),            // 08:45:00
+			CheckOutTime: baseTime.Add(8*time.Hour + 15*time.Minute), // 17:15:00
+			ExpectedTime: baseTime,
+			IsLate:       false,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			// Work duration = 8h 30m
+			// No late penalty
+			// Effective = 8h 30m
+		},
 	}
 	for _, att := range attendances {
-			db.Create(&att)
+		db.Create(&att)
 	}
 
 	// Test the endpoint
@@ -899,9 +927,9 @@ func TestGetEmployeeWorkHoursRanking(t *testing.T) {
 	// Log results for debugging
 	t.Log("\n=== Employee Work Hours Ranking ===")
 	for _, stat := range stats {
-			s := stat.(map[string]interface{})
-			t.Logf("Employee: %s (Dept: %s)", s["employee_name"], s["department"])
-			t.Logf("  Work Hours: %s", s["work_hours"])
+		s := stat.(map[string]interface{})
+		t.Logf("Employee: %s (Dept: %s)", s["employee_name"], s["department"])
+		t.Logf("  Work Hours: %s", s["work_hours"])
 	}
 
 	// Expected total work hours:
@@ -936,9 +964,168 @@ func TestGetEmployeeWorkHoursRanking(t *testing.T) {
 
 	// Cleanup
 	for _, att := range attendances {
-			db.Unscoped().Delete(&att)
+		db.Unscoped().Delete(&att)
 	}
 	for _, emp := range employees {
-			db.Unscoped().Delete(&emp)
+		db.Unscoped().Delete(&emp)
 	}
+}
+func TestCheckInAndCheckOut(t *testing.T) {
+	app, db := SetupTest(t)
+	app.Post("/check-in", handlers.CheckIn)
+	app.Post("/check-out", handlers.CheckOut)
+
+	// Create test employee
+	employee := models.User{
+		ID:                uuid.New().String(),
+		FullName:          "Test Employee",
+		Email:             "test@company.com",
+		PhoneNumber:       "+1234567890",
+		Address:           "123 Test St",
+		DateOfBirth:       time.Now().AddDate(-30, 0, 0),
+		Gender:            "male",
+		TaxID:             "TAX123",
+		HealthInsuranceID: "HI123",
+		SocialInsuranceID: "SI123",
+		Position:          "Developer",
+		Location:          "HQ",
+		Department:        "IT",
+		WalletAddress:     "0x123...",
+		Salary:            5000,
+		Role:              "employee",
+		Status:            "active",
+		OnboardDate:       time.Now(),
+		LeaveBalance:      20,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	db.Create(&employee)
+
+	t.Run("Successful Check-in", func(t *testing.T) {
+		t.Logf("Testing check-in for employee ID: %s", employee.ID)
+
+		checkInReq := handlers.CheckInRequest{
+			UserID: employee.ID,
+		}
+		body, _ := json.Marshal(checkInReq)
+		req := httptest.NewRequest("POST", "/check-in", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		// Log response
+		var response types.APIResponse
+		err = json.NewDecoder(resp.Body).Decode(&response)
+		assert.NoError(t, err)
+		t.Logf("Check-in response: %+v", response)
+
+		// Verify attendance record
+		var attendance models.Attendance
+		err = db.Where("user_id = ?", employee.ID).First(&attendance).Error
+		assert.NoError(t, err)
+		t.Logf("Created attendance record: %+v", attendance)
+		assert.False(t, attendance.CheckInTime.IsZero(), "Check-in time should be set")
+		assert.True(t, attendance.CheckOutTime.IsZero(), "Check-out time should not be set")
+	})
+
+	t.Run("Duplicate Check-in", func(t *testing.T) {
+		t.Logf("Testing duplicate check-in for employee ID: %s", employee.ID)
+
+		// Verify existing attendance
+		var existingAttendance models.Attendance
+		err := db.Where("user_id = ?", employee.ID).First(&existingAttendance).Error
+		assert.NoError(t, err)
+		t.Logf("Existing attendance before duplicate check-in: %+v", existingAttendance)
+
+		// Try duplicate check-in
+		checkInReq := handlers.CheckInRequest{
+			UserID: employee.ID,
+		}
+		body, _ := json.Marshal(checkInReq)
+		req := httptest.NewRequest("POST", "/check-in", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 400, resp.StatusCode)
+
+		var response types.APIResponse
+		err = json.NewDecoder(resp.Body).Decode(&response)
+		assert.NoError(t, err)
+		t.Logf("Duplicate check-in response: %+v", response)
+	})
+
+	t.Run("Successful Check-out", func(t *testing.T) {
+		t.Logf("Testing check-out for employee ID: %s", employee.ID)
+
+		// Verify attendance before check-out
+		var attendanceBeforeCheckout models.Attendance
+		err := db.Where("user_id = ?", employee.ID).First(&attendanceBeforeCheckout).Error
+		assert.NoError(t, err)
+		t.Logf("Attendance before check-out: %+v", attendanceBeforeCheckout)
+
+		checkOutReq := handlers.CheckOutRequest{
+			UserID: employee.ID,
+		}
+		body, _ := json.Marshal(checkOutReq)
+		req := httptest.NewRequest("POST", "/check-out", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		// Verify updated attendance
+		var attendanceAfterCheckout models.Attendance
+		err = db.Where("user_id = ?", employee.ID).First(&attendanceAfterCheckout).Error
+		assert.NoError(t, err)
+		t.Logf("Attendance after check-out: %+v", attendanceAfterCheckout)
+		assert.False(t, attendanceAfterCheckout.CheckOutTime.IsZero(), "Check-out time should be set")
+	})
+
+	t.Run("Check-out Without Check-in", func(t *testing.T) {
+		// Create another employee
+		employee2 := employee
+		employee2.ID = uuid.New().String()
+		employee2.Email = "test2@company.com"
+		db.Create(&employee2)
+		t.Logf("Testing check-out without check-in for employee ID: %s", employee2.ID)
+
+		// Verify no existing attendance - use Count instead of First to avoid log
+    var count int64
+    err := db.Model(&models.Attendance{}).Where("user_id = ?", employee2.ID).Count(&count).Error
+    assert.NoError(t, err)
+    assert.Equal(t, int64(0), count, "Should not have any attendance records")
+    t.Log("Verified no existing attendance record")
+
+		checkOutReq := handlers.CheckOutRequest{
+			UserID: employee2.ID,
+		}
+		body, _ := json.Marshal(checkOutReq)
+		req := httptest.NewRequest("POST", "/check-out", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 400, resp.StatusCode)
+
+		var response types.APIResponse
+		err = json.NewDecoder(resp.Body).Decode(&response)
+		assert.NoError(t, err)
+		t.Logf("Check-out without check-in response: %+v", response)
+
+		// Cleanup
+		db.Unscoped().Delete(&employee2)
+	})
+
+	// Cleanup
+	var attendances []models.Attendance
+	db.Where("user_id = ?", employee.ID).Find(&attendances)
+	for _, att := range attendances {
+		t.Logf("Cleaning up attendance record: %+v", att)
+		db.Unscoped().Delete(&att)
+	}
+	db.Unscoped().Delete(&employee)
 }
