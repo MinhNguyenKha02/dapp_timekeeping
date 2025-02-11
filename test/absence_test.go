@@ -48,7 +48,6 @@ func TestGetAbsences(t *testing.T) {
 		Department:        "Management",
 		WalletAddress:     "0x123...",
 		Salary:            10000,
-		LeaveBalance:      30,
 		Status:            "active",
 	}
 	if err := db.Create(&rootUser).Error; err != nil {
@@ -74,7 +73,6 @@ func TestGetAbsences(t *testing.T) {
 		Department:        "IT",
 		WalletAddress:     "0x456...",
 		Salary:            5000,
-		LeaveBalance:      20,
 		Status:            "active",
 	}
 

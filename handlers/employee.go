@@ -28,6 +28,7 @@ type AddEmployeeRequest struct {
 	WalletAddress string    `json:"wallet_address" validate:"required"`
 	Salary        float64   `json:"salary" validate:"required,gt=0"`
 	Role          string    `json:"role" validate:"required,oneof=employee hr hr_manager accountant"`
+	Nickname      string    `json:"nickname" validate:"required"`
 }
 
 type UpdateEmployeeRequest struct {
@@ -138,6 +139,10 @@ func GetAllEmployees(c *fiber.Ctx) error {
 }
 
 func AddEmployee(c *fiber.Ctx) error {
+	// Get claims from context
+	claims := c.Locals("claims").(jwt.MapClaims)
+	userRole := claims["role"].(string)
+
 	var req AddEmployeeRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(types.APIResponse{
@@ -146,32 +151,25 @@ func AddEmployee(c *fiber.Ctx) error {
 		})
 	}
 
-	// Create new employee
-	employee := models.User{
-		ID:            uuid.New().String(),
-		FullName:      req.FullName,
-		Email:         req.Email,
-		PhoneNumber:   req.PhoneNumber,
-		Address:       req.Address,
-		DateOfBirth:   req.DateOfBirth,
-		Gender:        req.Gender,
-		TaxID:         req.TaxID,
-		Position:      req.Position,
-		Location:      req.Location,
-		Department:    req.Department,
-		WalletAddress: req.WalletAddress,
-		Salary:        req.Salary,
-		Role:          req.Role,
-		Status:        "active",
-		LeaveBalance:  20, // Default leave balance
-		OnboardDate:   time.Now(),
+	// Only root can create initial employee records
+	if userRole != "root" {
+		return c.Status(403).JSON(types.APIResponse{
+			Success: false,
+			Error:   "Only root can create initial employee records",
+		})
 	}
 
-	// Start transaction
-	tx := DB.Begin()
+	// Create new employee with minimal info
+	employee := models.User{
+		ID:        uuid.New().String(),
+		Nickname:  req.Nickname,
+		Role:      req.Role,
+		Status:    "pending", // Changed from "active" to "pending"
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
 
-	if err := tx.Create(&employee).Error; err != nil {
-		tx.Rollback()
+	if err := DB.Create(&employee).Error; err != nil {
 		utils.Logger.Error("Failed to create employee", zap.Error(err))
 		return c.Status(500).JSON(types.APIResponse{
 			Success: false,
@@ -179,11 +177,9 @@ func AddEmployee(c *fiber.Ctx) error {
 		})
 	}
 
-	tx.Commit()
-
 	return c.JSON(types.APIResponse{
 		Success: true,
-		Message: "Employee added successfully",
+		Message: "Employee created successfully. Complete profile using refcode.",
 		Data:    employee,
 	})
 }
@@ -200,22 +196,7 @@ func UpdateEmployee(c *fiber.Ctx) error {
 	claims := c.Locals("claims").(jwt.MapClaims)
 	userRole := claims["role"].(string)
 
-	var req UpdateEmployeeRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(types.APIResponse{
-			Success: false,
-			Error:   "Invalid request body",
-		})
-	}
-
-	// Only root can update salary
-	if req.Salary != 0 && userRole != "root" {
-		return c.Status(403).JSON(types.APIResponse{
-			Success: false,
-			Error:   "Only root can update salary",
-		})
-	}
-
+	// Parse employee ID
 	id := c.Params("id")
 	userID, err := uuid.Parse(id)
 	if err != nil {
@@ -225,12 +206,41 @@ func UpdateEmployee(c *fiber.Ctx) error {
 		})
 	}
 
+	// Parse update data
 	var updateData map[string]interface{}
 	if err := c.BodyParser(&updateData); err != nil {
 		return c.Status(400).JSON(types.APIResponse{
 			Success: false,
 			Error:   types.ErrInvalidInput,
 		})
+	}
+
+	// Check for protected fields if not root
+	if userRole != "root" {
+		protectedFields := []string{"nickname", "role", "salary"}
+		for _, field := range protectedFields {
+			if _, exists := updateData[field]; exists {
+				return c.Status(403).JSON(types.APIResponse{
+					Success: false,
+					Error:   "Cannot update protected fields (nickname, role, salary)",
+				})
+			}
+		}
+	} else {
+		// Root can only update salary
+		allowedFields := []string{"salary"}
+		for field := range updateData {
+			isAllowed := false
+			for _, allowed := range allowedFields {
+				if field == allowed {
+					isAllowed = true
+					break
+				}
+			}
+			if !isAllowed {
+				delete(updateData, field)
+			}
+		}
 	}
 
 	// Start transaction

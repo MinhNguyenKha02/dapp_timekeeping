@@ -43,61 +43,92 @@ func TestGetAllEmployees(t *testing.T) {
 	assert.Nil(t, err)
 	assert.True(t, response.Success)
 }
-
-func TestAddEmployee(t *testing.T) {
+func TestAddEmployeeByRoot(t *testing.T) {
 	app, db := SetupTest(t)
-	app.Post("/employees", handlers.AddEmployee)
 
-	// Log initial state
-	t.Log("Initial state:")
-	dumpUsers(t, "Before adding employee")
+	// Set up route with JWT middleware
+	app.Post("/employees", func(c *fiber.Ctx) error {
+		// Get role from request header
+		role := c.Get("X-Test-Role", "root")         // Default to root if not set
+		t.Logf("Request role from header: %s", role) // Log the role
 
-	// Test successful creation with HR role
-	employee := handlers.AddEmployeeRequest{
-		FullName:      "Test Employee",
-		Email:         "test@company.com",
-		PhoneNumber:   "+1234567890",
-		Address:       "123 Test St",
-		DateOfBirth:   time.Now().AddDate(-25, 0, 0),
-		Gender:        "male",
-		TaxID:         "TAX123",
-		Position:      "HR Staff",
-		Location:      "HQ",
-		Department:    "HR",
-		WalletAddress: "0x123...",
-		Salary:        5000,
-		Role:          "hr",
-	}
+		claims := jwt.MapClaims{
+			"role": role,
+			"id":   uuid.New().String(),
+		}
+		t.Logf("Setting claims: %+v", claims) // Log the claims
+		c.Locals("claims", claims)
 
-	body, _ := json.Marshal(employee)
-	req := httptest.NewRequest("POST", "/employees", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
+		return handlers.AddEmployee(c)
+	})
 
-	resp, err := app.Test(req, -1)
-	assert.Nil(t, err)
-	assert.Equal(t, 200, resp.StatusCode)
+	t.Run("Root Creates Employee", func(t *testing.T) {
+		req := handlers.AddEmployeeRequest{
+			Nickname: "john_doe",
+			Role:     "hr",
+		}
 
-	// Log response
-	var response types.APIResponse
-	err = json.NewDecoder(resp.Body).Decode(&response)
-	assert.Nil(t, err)
-	t.Logf("Response: %+v", response)
+		body, _ := json.Marshal(req)
+		httpReq := httptest.NewRequest("POST", "/employees", bytes.NewBuffer(body))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("X-Test-Role", "root")
+		t.Logf("Making root request with headers: %+v", httpReq.Header)
 
-	// Verify database storage and log result
-	var storedEmployee models.User
-	err = db.Where("email = ?", employee.Email).First(&storedEmployee).Error
-	assert.Nil(t, err)
-	t.Logf("Stored employee: %+v", storedEmployee)
+		resp, err := app.Test(httpReq)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
 
-	// Log final state
-	dumpUsers(t, "After adding employee")
+		// Log response
+		var response types.APIResponse
+		err = json.NewDecoder(resp.Body).Decode(&response)
+		assert.NoError(t, err)
+		t.Logf("Response from create: %+v", response)
 
-	// Verify specific fields
-	assert.Equal(t, employee.FullName, storedEmployee.FullName)
-	assert.Equal(t, employee.Email, storedEmployee.Email)
-	assert.Equal(t, employee.Department, storedEmployee.Department)
-	assert.Equal(t, "hr", storedEmployee.Role)
-	assert.Equal(t, "active", storedEmployee.Status)
+		// Verify created employee
+		var employee models.User
+		err = db.Where("nickname = ?", req.Nickname).First(&employee).Error
+		assert.NoError(t, err)
+		t.Logf("Created employee: %+v", employee)
+		assert.Equal(t, "hr", employee.Role)
+		assert.Equal(t, "pending", employee.Status)
+		assert.Empty(t, employee.FullName) // Should be empty until profile completion
+	})
+
+	t.Run("Non-Root Cannot Create Employee", func(t *testing.T) {
+		req := handlers.AddEmployeeRequest{
+			Nickname: "jane_doe",
+			Role:     "employee",
+		}
+		t.Logf("Attempting to create employee with request: %+v", req)
+
+		body, _ := json.Marshal(req)
+		httpReq := httptest.NewRequest("POST", "/employees", bytes.NewBuffer(body))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("X-Test-Role", "hr")
+		t.Logf("Making HR request with headers: %+v", httpReq.Header)
+
+		resp, err := app.Test(httpReq)
+		assert.NoError(t, err)
+		assert.Equal(t, 403, resp.StatusCode)
+
+		var response types.APIResponse
+		err = json.NewDecoder(resp.Body).Decode(&response)
+		assert.NoError(t, err)
+		t.Logf("Response for HR request: %+v", response)
+
+		// Verify no employee was created
+		var count int64
+		err = db.Model(&models.User{}).Where("nickname = ?", req.Nickname).Count(&count).Error
+		assert.NoError(t, err)
+		t.Logf("Number of users with nickname %s: %d", req.Nickname, count)
+		assert.Equal(t, int64(0), count, "No user should be created")
+
+		assert.False(t, response.Success)
+		assert.Equal(t, "Only root can create initial employee records", response.Error)
+	})
+
+	// Cleanup
+	db.Exec("DELETE FROM users")
 }
 
 func TestUpdateEmployee(t *testing.T) {
@@ -133,7 +164,6 @@ func TestUpdateEmployee(t *testing.T) {
 		Role:              "employee",
 		Status:            "active",
 		OnboardDate:       time.Now(),
-		LeaveBalance:      20,
 	}
 
 	result := db.Create(&employee)
@@ -220,7 +250,6 @@ func TestDeleteEmployee(t *testing.T) {
 		Role:              "employee",
 		Status:            "active",
 		OnboardDate:       time.Now(),
-		LeaveBalance:      20,
 	}
 
 	result := db.Create(&employee)
@@ -295,7 +324,6 @@ func TestRootUpdateEmployeeSalary(t *testing.T) {
 		Role:              "employee",
 		Status:            "active",
 		OnboardDate:       time.Now().AddDate(0, -6, 0),
-		LeaveBalance:      20,
 	}
 	db.Create(&employee)
 	t.Logf("Initial employee details: %+v", employee)
@@ -364,7 +392,6 @@ func TestGetEmployeesWithFilters(t *testing.T) {
 			Role:              "employee",
 			Status:            "active",
 			OnboardDate:       time.Now().AddDate(0, -6, 0),
-			LeaveBalance:      20,
 		},
 		{
 			ID:                uuid.New().String(),
@@ -385,7 +412,6 @@ func TestGetEmployeesWithFilters(t *testing.T) {
 			Role:              "hr",
 			Status:            "left_company", // resigned
 			OnboardDate:       time.Now().AddDate(-1, 0, 0),
-			LeaveBalance:      15,
 		},
 	}
 	for _, emp := range employees {
@@ -535,7 +561,6 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			Role:              "employee",
 			Status:            "active",
 			OnboardDate:       time.Now().AddDate(0, -6, 0),
-			LeaveBalance:      20,
 			CreatedAt:         time.Now(),
 			UpdatedAt:         time.Now(),
 		},
@@ -558,7 +583,6 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			Role:              "employee",
 			Status:            "active",
 			OnboardDate:       time.Now().AddDate(0, -3, 0),
-			LeaveBalance:      20,
 			CreatedAt:         time.Now(),
 			UpdatedAt:         time.Now(),
 		},
@@ -581,7 +605,6 @@ func TestGetEmployeeTimeStats(t *testing.T) {
 			Role:              "hr",
 			Status:            "active",
 			OnboardDate:       time.Now().AddDate(-1, 0, 0),
-			LeaveBalance:      20,
 			CreatedAt:         time.Now(),
 			UpdatedAt:         time.Now(),
 		},
@@ -765,7 +788,6 @@ func TestGetEmployeeWorkHoursRanking(t *testing.T) {
 			Role:              "employee",
 			Status:            "active",
 			OnboardDate:       time.Now().AddDate(0, -6, 0),
-			LeaveBalance:      20,
 			CreatedAt:         time.Now(),
 			UpdatedAt:         time.Now(),
 		},
@@ -788,7 +810,6 @@ func TestGetEmployeeWorkHoursRanking(t *testing.T) {
 			Role:              "employee",
 			Status:            "active",
 			OnboardDate:       time.Now().AddDate(0, -3, 0),
-			LeaveBalance:      20,
 			CreatedAt:         time.Now(),
 			UpdatedAt:         time.Now(),
 		},
@@ -811,7 +832,6 @@ func TestGetEmployeeWorkHoursRanking(t *testing.T) {
 			Role:              "hr",
 			Status:            "active",
 			OnboardDate:       time.Now().AddDate(-1, 0, 0),
-			LeaveBalance:      20,
 			CreatedAt:         time.Now(),
 			UpdatedAt:         time.Now(),
 		},
@@ -995,7 +1015,6 @@ func TestCheckInAndCheckOut(t *testing.T) {
 		Role:              "employee",
 		Status:            "active",
 		OnboardDate:       time.Now(),
-		LeaveBalance:      20,
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 	}
@@ -1094,11 +1113,11 @@ func TestCheckInAndCheckOut(t *testing.T) {
 		t.Logf("Testing check-out without check-in for employee ID: %s", employee2.ID)
 
 		// Verify no existing attendance - use Count instead of First to avoid log
-    var count int64
-    err := db.Model(&models.Attendance{}).Where("user_id = ?", employee2.ID).Count(&count).Error
-    assert.NoError(t, err)
-    assert.Equal(t, int64(0), count, "Should not have any attendance records")
-    t.Log("Verified no existing attendance record")
+		var count int64
+		err := db.Model(&models.Attendance{}).Where("user_id = ?", employee2.ID).Count(&count).Error
+		assert.NoError(t, err)
+		assert.Equal(t, int64(0), count, "Should not have any attendance records")
+		t.Log("Verified no existing attendance record")
 
 		checkOutReq := handlers.CheckOutRequest{
 			UserID: employee2.ID,
@@ -1127,5 +1146,107 @@ func TestCheckInAndCheckOut(t *testing.T) {
 		t.Logf("Cleaning up attendance record: %+v", att)
 		db.Unscoped().Delete(&att)
 	}
+	db.Unscoped().Delete(&employee)
+}
+
+func TestUpdateEmployeeByNonRoot(t *testing.T) {
+	app, db := SetupTest(t)
+
+	// Set up route with JWT middleware
+	app.Patch("/employees/:id", func(c *fiber.Ctx) error {
+		c.Locals("claims", jwt.MapClaims{
+			"role": c.Get("X-Test-Role", ""),
+			"id":   c.Get("X-Test-ID", ""),
+		})
+		return handlers.UpdateEmployee(c)
+	})
+
+	// Create test employee with minimal info (as root would do)
+	employee := models.User{
+		ID:        uuid.New().String(),
+		Nickname:  "testuser",
+		Role:      "employee",
+		Status:    "pending", // Initial status is pending
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	result := db.Create(&employee)
+	assert.NoError(t, result.Error)
+	t.Logf("Created test employee with minimal info: %+v", employee)
+
+	t.Run("Employee Completes Employee Profile", func(t *testing.T) {
+		updateData := map[string]interface{}{
+			"full_name":    "Test Employee",
+			"email":        "test@company.com",
+			"phone_number": "+1234567890",
+			"address":      "123 Test St",
+			"position":     "Developer",
+			"department":   "IT",
+			"location":     "HQ",
+			"status":       "active",
+		}
+		body, _ := json.Marshal(updateData)
+
+		req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Test-Role", "hr")
+		req.Header.Set("X-Test-ID", uuid.New().String())
+
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		// Verify updates
+		var updatedEmployee models.User
+		err = db.First(&updatedEmployee, "id = ?", employee.ID).Error
+		assert.NoError(t, err)
+
+		// Verify all fields were updated correctly
+		assert.Equal(t, "Test Employee", updatedEmployee.FullName)
+		assert.Equal(t, "test@company.com", updatedEmployee.Email)
+		assert.Equal(t, "+1234567890", updatedEmployee.PhoneNumber)
+		assert.Equal(t, "123 Test St", updatedEmployee.Address)
+		assert.Equal(t, "Developer", updatedEmployee.Position)
+		assert.Equal(t, "IT", updatedEmployee.Department)
+		assert.Equal(t, "HQ", updatedEmployee.Location)
+
+		// Verify protected fields remain unchanged
+		assert.Equal(t, "testuser", updatedEmployee.Nickname)
+		assert.Equal(t, "employee", updatedEmployee.Role)
+		assert.Equal(t, float64(0), updatedEmployee.Salary)
+
+		// Verify status changed to active after profile completion
+		assert.Equal(t, "active", updatedEmployee.Status)
+
+		t.Logf("Updated employee profile: %+v", updatedEmployee)
+	})
+	t.Run("Employee Cannot Update Protected Fields", func(t *testing.T) {
+		protectedUpdates := map[string]interface{}{
+			"nickname": "newname",
+			"role":     "hr",
+			"salary":   5000,
+		}
+		body, _ := json.Marshal(protectedUpdates)
+
+		req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Test-Role", "hr")
+		req.Header.Set("X-Test-ID", uuid.New().String())
+
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 403, resp.StatusCode)
+
+		// Verify protected fields remain unchanged
+		var unchangedEmployee models.User
+		err = db.First(&unchangedEmployee, "id = ?", employee.ID).Error
+		assert.NoError(t, err)
+		assert.Equal(t, "testuser", unchangedEmployee.Nickname)
+		assert.Equal(t, "employee", unchangedEmployee.Role)
+		assert.Equal(t, float64(0), unchangedEmployee.Salary)
+		t.Log("Protected fields update correctly rejected for HR role")
+	})
+
+	// Cleanup
 	db.Unscoped().Delete(&employee)
 }

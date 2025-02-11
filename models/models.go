@@ -10,24 +10,24 @@ import (
 
 type User struct {
 	ID                 string       `gorm:"type:text;primary_key" json:"id"`
-	FullName           string       `gorm:"type:text;not null;default:''" json:"full_name"`
-	Email              string       `gorm:"type:text;unique;not null;default:''" json:"email"`
+	Nickname           string       `gorm:"type:text;unique;not null" json:"nickname"`
+	FullName           string       `gorm:"type:text;default:''" json:"full_name"`
+	Email              string       `gorm:"type:text;default:''" json:"email"`
 	PhoneNumber        string       `gorm:"type:text;default:''" json:"phone_number"`
 	Address            string       `gorm:"type:text;default:''" json:"address"`
-	DateOfBirth        time.Time    `json:"date_of_birth"`
+	DateOfBirth        time.Time    `gorm:"default:''" json:"date_of_birth"`
 	Gender             string       `gorm:"type:text;default:''" json:"gender"`
 	TaxID              string       `gorm:"type:text;default:''" json:"tax_id"`
 	HealthInsuranceID  string       `gorm:"type:text;default:''" json:"health_insurance_id"`
 	SocialInsuranceID  string       `gorm:"type:text;default:''" json:"social_insurance_id"`
-	NumberOfDependents int          `json:"number_of_dependents"`
+	NumberOfDependents int          `gorm:"default:0" json:"number_of_dependents"`
 	Position           string       `gorm:"type:text;default:''" json:"position"`
 	Location           string       `gorm:"type:text;default:''" json:"location"`
-	OnboardDate        time.Time    `json:"onboard_date"`
+	OnboardDate        time.Time    `gorm:"default:''" json:"onboard_date"`
 	Role               string       `gorm:"type:text;not null;default:'employee'" json:"role"`
 	Department         string       `gorm:"type:text;default:''" json:"department"`
 	WalletAddress      string       `gorm:"type:text;default:''" json:"wallet_address"`
 	Salary             float64      `gorm:"default:0" json:"salary"`
-	LeaveBalance       int          `gorm:"default:0" json:"leave_balance"`
 	Status             string       `gorm:"type:text;not null;default:'active'" json:"status"`
 	Permissions        []Permission `gorm:"many2many:user_permissions;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"permissions"`
 	CreatedAt          time.Time    `gorm:"not null" json:"created_at"`
