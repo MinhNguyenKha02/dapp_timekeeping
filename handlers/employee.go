@@ -184,13 +184,6 @@ func AddEmployee(c *fiber.Ctx) error {
 	})
 }
 
-func GetSalaryInfo(c *fiber.Ctx) error {
-	return c.JSON(types.APIResponse{
-		Success: false,
-		Error:   "Not implemented",
-	})
-}
-
 func UpdateEmployee(c *fiber.Ctx) error {
 	// Get claims from context
 	claims := c.Locals("claims").(jwt.MapClaims)
@@ -278,39 +271,6 @@ func UpdateEmployee(c *fiber.Ctx) error {
 		Success: true,
 		Message: "Employee updated successfully",
 		Data:    employee,
-	})
-}
-
-func DeleteEmployee(c *fiber.Ctx) error {
-	id := c.Params("id")
-	userID, err := uuid.Parse(id)
-	if err != nil {
-		return c.Status(400).JSON(types.APIResponse{
-			Success: false,
-			Error:   "Invalid user ID",
-		})
-	}
-
-	var employee models.User
-	if err := DB.First(&employee, "id = ?", userID).Error; err != nil {
-		return c.Status(404).JSON(types.APIResponse{
-			Success: false,
-			Error:   "Employee not found",
-		})
-	}
-
-	// Soft delete by updating status
-	if err := DB.Model(&employee).Update("status", "left_company").Error; err != nil {
-		utils.Logger.Error("Failed to delete employee", zap.Error(err))
-		return c.Status(500).JSON(types.APIResponse{
-			Success: false,
-			Error:   types.ErrDatabaseError,
-		})
-	}
-
-	return c.JSON(types.APIResponse{
-		Success: true,
-		Message: "Employee deleted successfully",
 	})
 }
 

@@ -16,18 +16,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func dumpUsers(t *testing.T, label string) {
-	var users []models.User
-	if err := GetTestDB().Find(&users).Error; err != nil {
-		t.Logf("%s - Error getting users: %v", label, err)
-		return
-	}
-	t.Logf("%s - Found %d users:", label, len(users))
-	for _, u := range users {
-		t.Logf("  User: ID=%s, FullName=%s, Status=%s", u.ID, u.FullName, u.Status)
-	}
-}
-
 func TestGetAllEmployees(t *testing.T) {
 	app := GetTestApp()
 	app.Get("/employees", handlers.GetAllEmployees)
@@ -131,141 +119,106 @@ func TestAddEmployeeByRoot(t *testing.T) {
 	db.Exec("DELETE FROM users")
 }
 
-func TestUpdateEmployee(t *testing.T) {
+func TestUpdateEmployeeByNonRoot(t *testing.T) {
 	app, db := SetupTest(t)
 
 	// Set up route with JWT middleware
 	app.Patch("/employees/:id", func(c *fiber.Ctx) error {
-		// Set claims for the request
 		c.Locals("claims", jwt.MapClaims{
-			"role": c.Get("X-Test-Role", ""), // Will be set in test requests
+			"role": c.Get("X-Test-Role", ""),
 			"id":   c.Get("X-Test-ID", ""),
 		})
 		return handlers.UpdateEmployee(c)
 	})
 
-	// Create test employee
+	// Create test employee with minimal info (as root would do)
 	employee := models.User{
-		ID:                uuid.New().String(),
-		FullName:          "Update Test",
-		Email:             "update@company.com",
-		PhoneNumber:       "+1234567890",
-		Address:           "456 Test St",
-		DateOfBirth:       time.Now().AddDate(-30, 0, 0),
-		Gender:            "female",
-		TaxID:             "TAX456",
-		HealthInsuranceID: "HI456",
-		SocialInsuranceID: "SI456",
-		Position:          "Developer",
-		Location:          "Branch A",
-		Department:        "IT",
-		WalletAddress:     "0x456...",
-		Salary:            6000,
-		Role:              "employee",
-		Status:            "active",
-		OnboardDate:       time.Now(),
+		ID:        uuid.New().String(),
+		Nickname:  "testuser",
+		Role:      "employee",
+		Status:    "pending", // Initial status is pending
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
-
 	result := db.Create(&employee)
-	assert.Nil(t, result.Error)
+	assert.NoError(t, result.Error)
+	t.Logf("Created test employee with minimal info: %+v", employee)
 
-	// Test update non-salary fields (should succeed)
-	updateData := map[string]interface{}{
-		"position":   "Senior Developer",
-		"location":   "Branch B",
-		"department": "Engineering",
-	}
+	t.Run("Employee Completes Employee Profile", func(t *testing.T) {
+		updateData := map[string]interface{}{
+			"full_name":    "Test Employee",
+			"email":        "test@company.com",
+			"phone_number": "+1234567890",
+			"address":      "123 Test St",
+			"position":     "Developer",
+			"department":   "IT",
+			"location":     "HQ",
+			"status":       "active",
+		}
+		body, _ := json.Marshal(updateData)
 
-	body, _ := json.Marshal(updateData)
-	req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Test-Role", "employee")
-	req.Header.Set("X-Test-ID", employee.ID)
+		req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Test-Role", "hr")
+		req.Header.Set("X-Test-ID", uuid.New().String())
 
-	resp, err := app.Test(req)
-	assert.Nil(t, err)
-	assert.Equal(t, 200, resp.StatusCode)
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
 
-	// Verify non-salary updates
-	var updatedEmployee models.User
-	err = db.First(&updatedEmployee, "id = ?", employee.ID).Error
-	assert.Nil(t, err)
-	assert.Equal(t, "Senior Developer", updatedEmployee.Position)
-	assert.Equal(t, "Branch B", updatedEmployee.Location)
-	assert.Equal(t, "Engineering", updatedEmployee.Department)
-	assert.Equal(t, float64(6000), updatedEmployee.Salary) // Salary should remain unchanged
+		// Verify updates
+		var updatedEmployee models.User
+		err = db.First(&updatedEmployee, "id = ?", employee.ID).Error
+		assert.NoError(t, err)
 
-	// Test salary update as non-root (should fail)
-	updateData = map[string]interface{}{
-		"salary": 7000,
-	}
-	body, _ = json.Marshal(updateData)
-	req = httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Test-Role", "employee")
-	req.Header.Set("X-Test-ID", employee.ID)
+		// Verify all fields were updated correctly
+		assert.Equal(t, "Test Employee", updatedEmployee.FullName)
+		assert.Equal(t, "test@company.com", updatedEmployee.Email)
+		assert.Equal(t, "+1234567890", updatedEmployee.PhoneNumber)
+		assert.Equal(t, "123 Test St", updatedEmployee.Address)
+		assert.Equal(t, "Developer", updatedEmployee.Position)
+		assert.Equal(t, "IT", updatedEmployee.Department)
+		assert.Equal(t, "HQ", updatedEmployee.Location)
 
-	resp, err = app.Test(req)
-	assert.Nil(t, err)
-	assert.Equal(t, 403, resp.StatusCode) // Should be forbidden
+		// Verify protected fields remain unchanged
+		assert.Equal(t, "testuser", updatedEmployee.Nickname)
+		assert.Equal(t, "employee", updatedEmployee.Role)
+		assert.Equal(t, float64(0), updatedEmployee.Salary)
 
-	// Test salary update as root (should succeed)
-	req = httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Test-Role", "root")
-	req.Header.Set("X-Test-ID", uuid.New().String()) // Root user ID
+		// Verify status changed to active after profile completion
+		assert.Equal(t, "active", updatedEmployee.Status)
 
-	resp, err = app.Test(req)
-	assert.Nil(t, err)
-	assert.Equal(t, 200, resp.StatusCode)
+		t.Logf("Updated employee profile: %+v", updatedEmployee)
+	})
+	t.Run("Employee Cannot Update Protected Fields", func(t *testing.T) {
+		protectedUpdates := map[string]interface{}{
+			"nickname": "newname",
+			"role":     "hr",
+			"salary":   5000,
+		}
+		body, _ := json.Marshal(protectedUpdates)
 
-	// Verify salary was updated by root
-	err = db.First(&updatedEmployee, "id = ?", employee.ID).Error
-	assert.Nil(t, err)
-	assert.Equal(t, float64(7000), updatedEmployee.Salary)
-	t.Log("Root user successfully updated salary")
-}
+		req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Test-Role", "hr")
+		req.Header.Set("X-Test-ID", uuid.New().String())
 
-func TestDeleteEmployee(t *testing.T) {
-	app, db := SetupTest(t)
-	app.Delete("/employees/:id", handlers.DeleteEmployee)
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 403, resp.StatusCode)
 
-	// Create test employee
-	employee := models.User{
-		ID:                uuid.New().String(),
-		FullName:          "Delete Test",
-		Email:             "delete@company.com",
-		PhoneNumber:       "+1234567890",
-		Address:           "789 Test St",
-		DateOfBirth:       time.Now().AddDate(-28, 0, 0),
-		Gender:            "male",
-		TaxID:             "TAX789",
-		HealthInsuranceID: "HI789",
-		SocialInsuranceID: "SI789",
-		Position:          "Analyst",
-		Location:          "Branch C",
-		Department:        "Finance",
-		WalletAddress:     "0x789...",
-		Salary:            5500,
-		Role:              "employee",
-		Status:            "active",
-		OnboardDate:       time.Now(),
-	}
+		// Verify protected fields remain unchanged
+		var unchangedEmployee models.User
+		err = db.First(&unchangedEmployee, "id = ?", employee.ID).Error
+		assert.NoError(t, err)
+		assert.Equal(t, "testuser", unchangedEmployee.Nickname)
+		assert.Equal(t, "employee", unchangedEmployee.Role)
+		assert.Equal(t, float64(0), unchangedEmployee.Salary)
+		t.Log("Protected fields update correctly rejected for HR role")
+	})
 
-	result := db.Create(&employee)
-	assert.Nil(t, result.Error)
-
-	// Test deletion
-	req := httptest.NewRequest("DELETE", "/employees/"+employee.ID, nil)
-	resp, err := app.Test(req)
-	assert.Nil(t, err)
-	assert.Equal(t, 200, resp.StatusCode)
-
-	// Verify soft delete
-	var deletedEmployee models.User
-	err = db.First(&deletedEmployee, "id = ?", employee.ID).Error
-	assert.Nil(t, err)
-	assert.Equal(t, "left_company", deletedEmployee.Status)
+	// Cleanup
+	db.Unscoped().Delete(&employee)
 }
 
 func TestRootUpdateEmployeeSalary(t *testing.T) {
@@ -273,89 +226,75 @@ func TestRootUpdateEmployeeSalary(t *testing.T) {
 
 	// Set up route with JWT middleware
 	app.Patch("/employees/:id", func(c *fiber.Ctx) error {
-		// Set claims for the request
 		c.Locals("claims", jwt.MapClaims{
-			"role": c.Get("X-Test-Role", ""), // Will be set in test requests
-			"id":   c.Get("X-Test-ID", ""),
+			"role": c.Get("X-Test-Role", ""),
 		})
 		return handlers.UpdateEmployee(c)
 	})
 
-	// Create root user with complete details
-	rootUser := models.User{
-		ID:                uuid.New().String(),
-		FullName:          "Root Admin",
-		Email:             "root@company.com",
-		PhoneNumber:       "+1234567890",
-		Address:           "123 Admin St",
-		DateOfBirth:       time.Now().AddDate(-35, 0, 0),
-		Gender:            "male",
-		TaxID:             "ROOT123",
-		HealthInsuranceID: "HI-ROOT123",
-		SocialInsuranceID: "SI-ROOT123",
-		Position:          "System Admin",
-		Location:          "HQ",
-		Department:        "IT",
-		WalletAddress:     "0xroot...",
-		Role:              "root",
-		Status:            "active",
-		OnboardDate:       time.Now().AddDate(-2, 0, 0),
-	}
-	db.Create(&rootUser)
-	t.Logf("Created root user: %+v", rootUser)
-
-	// Create test employee with complete details
+	// Create test employee with minimal info (as root would do)
 	employee := models.User{
-		ID:                uuid.New().String(),
-		FullName:          "Test Employee",
-		Email:             "employee@company.com",
-		PhoneNumber:       "+9876543210",
-		Address:           "456 Staff St",
-		DateOfBirth:       time.Now().AddDate(-25, 0, 0),
-		Gender:            "female",
-		TaxID:             "EMP456",
-		HealthInsuranceID: "HI-EMP456",
-		SocialInsuranceID: "SI-EMP456",
-		Position:          "Staff",
-		Location:          "Branch A",
-		Department:        "Operations",
-		WalletAddress:     "0xemp...",
-		Salary:            5000,
-		Role:              "employee",
-		Status:            "active",
-		OnboardDate:       time.Now().AddDate(0, -6, 0),
+		ID:       uuid.New().String(),
+		Nickname: "testuser",
+		Role:     "employee",
+		Status:   "pending", // Initial status is pending
 	}
-	db.Create(&employee)
-	t.Logf("Initial employee details: %+v", employee)
+	result := db.Create(&employee)
+	assert.NoError(t, result.Error)
+	t.Logf("Created employee with minimal info: %+v", employee)
 
-	// Root updates employee salary
-	rootToken := createTestToken(rootUser.ID, "root")
-	updateReq := handlers.UpdateEmployeeRequest{
-		Salary: 6000,
+	// HR updates employee details
+	updateProfileData := map[string]interface{}{
+		"full_name":    "Test Employee",
+		"email":        "employee@company.com",
+		"phone_number": "+9876543210",
+		"position":     "Staff",
+		"department":   "Operations",
 	}
-	body, _ := json.Marshal(updateReq)
+	body, _ := json.Marshal(updateProfileData)
+
+	// Update profile as HR
 	req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
-	req.Header.Set("Authorization", "Bearer "+rootToken)
-	req.Header.Set("X-Test-Role", "root") // Set test role
-	req.Header.Set("X-Test-ID", rootUser.ID)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-Role", "employee")
 
 	resp, err := app.Test(req)
 	assert.NoError(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
 
-	// Verify salary was updated
+	// Verify profile was updated
 	var updatedEmployee models.User
 	err = db.First(&updatedEmployee, "id = ?", employee.ID).Error
 	assert.NoError(t, err)
-	assert.Equal(t, float64(6000), updatedEmployee.Salary)
-	t.Logf("Updated employee salary: %v", updatedEmployee.Salary)
+	assert.Equal(t, "Test Employee", updatedEmployee.FullName)
+	assert.Equal(t, float64(0), updatedEmployee.Salary) // Salary should still be 0
+	t.Logf("Updated employee profile: %+v", updatedEmployee)
 
-	// Try updating salary with non-root user (should fail)
-	employeeToken := createTestToken(employee.ID, "employee")
+	// Now test root updating salary
+	salaryUpdate := map[string]interface{}{
+		"salary": 6000,
+	}
+	body, _ = json.Marshal(salaryUpdate)
+
+	// Update salary as root
 	req = httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
-	req.Header.Set("Authorization", "Bearer "+employeeToken)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-Role", "root")
+
+	resp, err = app.Test(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	// Verify salary was updated
+	err = db.First(&updatedEmployee, "id = ?", employee.ID).Error
+	assert.NoError(t, err)
+	assert.Equal(t, float64(6000), updatedEmployee.Salary)
+	t.Logf("Root updated employee salary: %v", updatedEmployee.Salary)
+
+	// Test non-root user trying to update salary
+	req = httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-Role", "hr")
 
 	resp, err = app.Test(req)
 	assert.NoError(t, err)
@@ -364,7 +303,6 @@ func TestRootUpdateEmployeeSalary(t *testing.T) {
 
 	// Cleanup
 	db.Unscoped().Delete(&employee)
-	db.Unscoped().Delete(&rootUser)
 }
 
 func TestGetEmployeesWithFilters(t *testing.T) {
@@ -1146,107 +1084,5 @@ func TestCheckInAndCheckOut(t *testing.T) {
 		t.Logf("Cleaning up attendance record: %+v", att)
 		db.Unscoped().Delete(&att)
 	}
-	db.Unscoped().Delete(&employee)
-}
-
-func TestUpdateEmployeeByNonRoot(t *testing.T) {
-	app, db := SetupTest(t)
-
-	// Set up route with JWT middleware
-	app.Patch("/employees/:id", func(c *fiber.Ctx) error {
-		c.Locals("claims", jwt.MapClaims{
-			"role": c.Get("X-Test-Role", ""),
-			"id":   c.Get("X-Test-ID", ""),
-		})
-		return handlers.UpdateEmployee(c)
-	})
-
-	// Create test employee with minimal info (as root would do)
-	employee := models.User{
-		ID:        uuid.New().String(),
-		Nickname:  "testuser",
-		Role:      "employee",
-		Status:    "pending", // Initial status is pending
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-	result := db.Create(&employee)
-	assert.NoError(t, result.Error)
-	t.Logf("Created test employee with minimal info: %+v", employee)
-
-	t.Run("Employee Completes Employee Profile", func(t *testing.T) {
-		updateData := map[string]interface{}{
-			"full_name":    "Test Employee",
-			"email":        "test@company.com",
-			"phone_number": "+1234567890",
-			"address":      "123 Test St",
-			"position":     "Developer",
-			"department":   "IT",
-			"location":     "HQ",
-			"status":       "active",
-		}
-		body, _ := json.Marshal(updateData)
-
-		req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Test-Role", "hr")
-		req.Header.Set("X-Test-ID", uuid.New().String())
-
-		resp, err := app.Test(req)
-		assert.NoError(t, err)
-		assert.Equal(t, 200, resp.StatusCode)
-
-		// Verify updates
-		var updatedEmployee models.User
-		err = db.First(&updatedEmployee, "id = ?", employee.ID).Error
-		assert.NoError(t, err)
-
-		// Verify all fields were updated correctly
-		assert.Equal(t, "Test Employee", updatedEmployee.FullName)
-		assert.Equal(t, "test@company.com", updatedEmployee.Email)
-		assert.Equal(t, "+1234567890", updatedEmployee.PhoneNumber)
-		assert.Equal(t, "123 Test St", updatedEmployee.Address)
-		assert.Equal(t, "Developer", updatedEmployee.Position)
-		assert.Equal(t, "IT", updatedEmployee.Department)
-		assert.Equal(t, "HQ", updatedEmployee.Location)
-
-		// Verify protected fields remain unchanged
-		assert.Equal(t, "testuser", updatedEmployee.Nickname)
-		assert.Equal(t, "employee", updatedEmployee.Role)
-		assert.Equal(t, float64(0), updatedEmployee.Salary)
-
-		// Verify status changed to active after profile completion
-		assert.Equal(t, "active", updatedEmployee.Status)
-
-		t.Logf("Updated employee profile: %+v", updatedEmployee)
-	})
-	t.Run("Employee Cannot Update Protected Fields", func(t *testing.T) {
-		protectedUpdates := map[string]interface{}{
-			"nickname": "newname",
-			"role":     "hr",
-			"salary":   5000,
-		}
-		body, _ := json.Marshal(protectedUpdates)
-
-		req := httptest.NewRequest("PATCH", "/employees/"+employee.ID, bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Test-Role", "hr")
-		req.Header.Set("X-Test-ID", uuid.New().String())
-
-		resp, err := app.Test(req)
-		assert.NoError(t, err)
-		assert.Equal(t, 403, resp.StatusCode)
-
-		// Verify protected fields remain unchanged
-		var unchangedEmployee models.User
-		err = db.First(&unchangedEmployee, "id = ?", employee.ID).Error
-		assert.NoError(t, err)
-		assert.Equal(t, "testuser", unchangedEmployee.Nickname)
-		assert.Equal(t, "employee", unchangedEmployee.Role)
-		assert.Equal(t, float64(0), unchangedEmployee.Salary)
-		t.Log("Protected fields update correctly rejected for HR role")
-	})
-
-	// Cleanup
 	db.Unscoped().Delete(&employee)
 }
