@@ -18,19 +18,392 @@ import (
 )
 
 func TestGetAllEmployees(t *testing.T) {
-	app := GetTestApp()
+	app, db := SetupTest(t)
 	app.Get("/employees", handlers.GetAllEmployees)
 
-	// Test successful fetch
-	req := httptest.NewRequest("GET", "/employees", nil)
-	resp, err := app.Test(req)
-	assert.Nil(t, err)
-	assert.Equal(t, 200, resp.StatusCode)
+	t.Run("Get Employees When Empty", func(t *testing.T) {
+		// Ensure no employees exist
+		result := db.Exec("DELETE FROM users")
+		assert.NoError(t, result.Error)
+		t.Log("Cleared all users from database")
 
-	var response types.APIResponse
-	err = json.NewDecoder(resp.Body).Decode(&response)
-	assert.Nil(t, err)
-	assert.True(t, response.Success)
+		req := httptest.NewRequest("GET", "/employees", nil)
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		var response types.APIResponse
+		err = json.NewDecoder(resp.Body).Decode(&response)
+		assert.NoError(t, err)
+		assert.True(t, response.Success)
+
+		// Verify empty list is returned
+		employeeList := response.Data.([]interface{})
+		assert.Equal(t, 0, len(employeeList))
+		t.Log("Successfully retrieved empty employee list")
+	})
+
+	// Create test employees with minimal info (as root would do)
+	employees := []models.User{
+		{
+			ID:          uuid.New().String(),
+			Nickname:    "test1",
+			Role:        "employee",
+			Status:      "pending", // Initial status is pending
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			OnboardDate: time.Now(),
+		},
+		{
+			ID:          uuid.New().String(),
+			Nickname:    "test2",
+			Role:        "hr",
+			Status:      "pending", // Initial status is pending
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			OnboardDate: time.Now(),
+		},
+	}
+
+	t.Logf("Creating %d employees with minimal info", len(employees))
+	for _, emp := range employees {
+		result := db.Create(&emp)
+		assert.NoError(t, result.Error)
+		t.Logf("Created employee: ID=%s, Nickname=%s, Role=%s, Status=%s",
+			emp.ID, emp.Nickname, emp.Role, emp.Status)
+	}
+
+	// Update employee profiles (as employees would do)
+	updates := []map[string]interface{}{
+		{
+			"full_name":    "Test Employee 1",
+			"email":        "test1@company.com",
+			"phone_number": "+1234567890",
+			"department":   "IT",
+			"position":     "Developer",
+			"status":       "active",
+		},
+		{
+			"full_name":    "Test Employee 2",
+			"email":        "test2@company.com",
+			"phone_number": "+0987654321",
+			"department":   "HR",
+			"position":     "HR Staff",
+			"status":       "active",
+		},
+	}
+
+	t.Log("Updating employee profiles")
+	for i, emp := range employees {
+		result := db.Model(&emp).Updates(updates[i])
+		assert.NoError(t, result.Error)
+		t.Logf("Updated employee %s: Department=%s, Position=%s, Status=%s",
+			emp.Nickname, updates[i]["department"], updates[i]["position"], updates[i]["status"])
+	}
+
+	t.Run("Get All Employees Without Filters", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/employees", nil)
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		var response types.APIResponse
+		err = json.NewDecoder(resp.Body).Decode(&response)
+		assert.NoError(t, err)
+		assert.True(t, response.Success)
+
+		// Verify all employees are returned
+		employeeList := response.Data.([]interface{})
+		assert.Equal(t, len(employees), len(employeeList))
+		t.Logf("Retrieved %d employees without filters", len(employeeList))
+
+		// Log each employee's details
+		for _, e := range employeeList {
+			emp := e.(map[string]interface{})
+			t.Logf("Employee: Nickname=%v, Department=%v, Role=%v, Status=%v",
+				emp["nickname"], emp["department"], emp["role"], emp["status"])
+		}
+	})
+
+	// Cleanup
+	t.Log("Cleaning up test data")
+	for _, emp := range employees {
+		result := db.Unscoped().Delete(&emp)
+		assert.NoError(t, result.Error)
+		t.Logf("Deleted employee: ID=%s", emp.ID)
+	}
+}
+
+func TestGetEmployeesWithFilters(t *testing.T) {
+	app, db := SetupTest(t)
+
+	// Set up routes
+	app.Get("/employees", handlers.GetAllEmployees)
+	app.Patch("/employees/:id", func(c *fiber.Ctx) error {
+		c.Locals("claims", jwt.MapClaims{
+			"role": c.Get("X-Test-Role", ""),
+		})
+		return handlers.UpdateEmployee(c)
+	})
+
+	now := time.Now()
+	baseTime := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
+
+	// Create test employees with minimal info (as root)
+	employees := []models.User{
+		{
+			ID:          uuid.New().String(),
+			Nickname:    "it_user",
+			Role:        "employee",
+			Status:      "pending",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			OnboardDate: baseTime.AddDate(0, -6, 0),
+		},
+		{
+			ID:          uuid.New().String(),
+			Nickname:    "hr_user",
+			Role:        "hr",
+			Status:      "pending",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			OnboardDate: baseTime.AddDate(-1, 0, 0),
+		},
+	}
+	for _, emp := range employees {
+		result := db.Create(&emp)
+		assert.NoError(t, result.Error)
+	}
+	t.Log("Created employees with minimal info")
+
+	// Update employee profiles
+	updateData := []map[string]interface{}{
+		{
+			"full_name":    "IT Employee",
+			"email":        "it@company.com",
+			"phone_number": "+1234567890",
+			"address":      "123 IT St",
+			"position":     "Developer",
+			"department":   "IT",
+			"location":     "HQ",
+			"status":       "active",
+		},
+		{
+			"full_name":    "HR Employee",
+			"email":        "hr@company.com",
+			"phone_number": "+9876543210",
+			"address":      "456 HR St",
+			"position":     "HR Staff",
+			"department":   "HR",
+			"location":     "Branch A",
+			"status":       "active",
+		},
+	}
+
+	// Update profiles
+	for i, emp := range employees {
+		body, _ := json.Marshal(updateData[i])
+		req := httptest.NewRequest("PATCH", "/employees/"+emp.ID, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Test-Role", "employee")
+		resp, err := app.Test(req)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		// Verify update
+		var updatedEmp models.User
+		err = db.First(&updatedEmp, "id = ?", emp.ID).Error
+		assert.NoError(t, err)
+		assert.Equal(t, "active", updatedEmp.Status)
+	}
+	t.Log("Updated employee profiles")
+
+	// Create attendance records that will trigger auto-creation of absences
+	// 1. Late without permission (30 minutes late)
+	lateAttendance := models.Attendance{
+		ID:           uuid.New().String(),
+		UserID:       employees[0].ID,
+		CheckInTime:  baseTime.Add(30 * time.Minute),
+		CheckOutTime: baseTime.Add(9 * time.Hour),
+		ExpectedTime: baseTime,
+		OnTime:       false,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	result := db.Create(&lateAttendance)
+	assert.NoError(t, result.Error)
+
+	// Auto-create late without permission absence
+	lateWithoutPermission := models.Absence{
+		ID:          uuid.New().String(),
+		UserID:      employees[0].ID,
+		Date:        now,
+		Type:        "late_without_permission",
+		Reason:      "Late check-in without prior permission",
+		Status:      "approved",
+		StartDate:   lateAttendance.CheckInTime,
+		EndDate:     lateAttendance.CheckInTime,
+		ProcessedBy: &employees[1].ID, // HR processes the absence
+		ProcessedAt: &now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	result = db.Create(&lateWithoutPermission)
+	assert.NoError(t, result.Error)
+
+	// 2. Leave without permission (left 2 hours early)
+	earlyLeaveAttendance := models.Attendance{
+		ID:           uuid.New().String(),
+		UserID:       employees[0].ID,
+		CheckInTime:  baseTime,
+		CheckOutTime: baseTime.Add(6 * time.Hour),
+		ExpectedTime: baseTime,
+		OnTime:       false,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	result = db.Create(&earlyLeaveAttendance)
+	assert.NoError(t, result.Error)
+
+	// Auto-create leave without permission absence
+	leaveWithoutPermission := models.Absence{
+		ID:          uuid.New().String(),
+		UserID:      employees[0].ID,
+		Date:        now,
+		Type:        "leave_without_permission",
+		Reason:      "Early leave without prior permission",
+		Status:      "approved",
+		StartDate:   earlyLeaveAttendance.CheckOutTime,
+		EndDate:     baseTime.Add(8 * time.Hour),
+		ProcessedBy: &employees[1].ID, // HR processes the absence
+		ProcessedAt: &now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	result = db.Create(&leaveWithoutPermission)
+	assert.NoError(t, result.Error)
+
+	// 3. Create leave with permission (approved)
+	leaveWithPermission := models.Absence{
+		ID:          uuid.New().String(),
+		UserID:      employees[1].ID,
+		Date:        now,
+		Type:        "leave_with_permission",
+		Reason:      "Doctor appointment",
+		Status:      "approved",
+		StartDate:   baseTime.AddDate(0, 0, 1),
+		EndDate:     baseTime.AddDate(0, 0, 1).Add(4 * time.Hour),
+		ProcessedBy: &employees[1].ID,
+		ProcessedAt: &now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	result = db.Create(&leaveWithPermission)
+	assert.NoError(t, result.Error)
+
+	// 4. Create late with permission request (approved)
+	lateWithPermission := models.Absence{
+		ID:          uuid.New().String(),
+		UserID:      employees[1].ID,
+		Date:        now,
+		Type:        "late_with_permission",
+		Reason:      "Traffic accident",
+		Status:      "approved",
+		StartDate:   baseTime,
+		EndDate:     baseTime.Add(1 * time.Hour),
+		ProcessedBy: &employees[1].ID, // HR processes the absence
+		ProcessedAt: &now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	result = db.Create(&lateWithPermission)
+	assert.NoError(t, result.Error)
+
+	// Test cases
+	testCases := []struct {
+		name           string
+		filter         string
+		expectedCount  int
+		expectedDept   string
+		expectedStatus string
+	}{
+		{
+			name:          "Filter by IT department",
+			filter:        "department=IT",
+			expectedCount: 1,
+			expectedDept:  "IT",
+		},
+		{
+			name:           "Filter by late without permission",
+			filter:         "status=late_without_permission",
+			expectedCount:  1,
+			expectedStatus: "active",
+		},
+		{
+			name:           "Filter by leave without permission",
+			filter:         "status=leave_without_permission",
+			expectedCount:  1,
+			expectedStatus: "active",
+		},
+		{
+			name:           "Filter by leave with permission",
+			filter:         "status=leave_with_permission",
+			expectedCount:  1,
+			expectedStatus: "active",
+		},
+		{
+			name:           "Filter by late with permission",
+			filter:         "status=late_with_permission",
+			expectedCount:  1,
+			expectedStatus: "active",
+		},
+		{
+			name: "Filter by onboard date range",
+			filter: fmt.Sprintf("onboard_from=%s&onboard_to=%s",
+				time.Now().AddDate(-2, 0, 0).Format("2006-01-02"),
+				time.Now().Format("2006-01-02")),
+			expectedCount: 2,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/employees?"+tc.filter, nil)
+			resp, err := app.Test(req)
+			assert.NoError(t, err)
+			assert.Equal(t, 200, resp.StatusCode)
+
+			var response types.APIResponse
+			err = json.NewDecoder(resp.Body).Decode(&response)
+			assert.NoError(t, err)
+
+			employees := response.Data.([]interface{})
+			assert.Equal(t, tc.expectedCount, len(employees))
+
+			if len(employees) > 0 {
+				emp := employees[0].(map[string]interface{})
+				if tc.expectedDept != "" {
+					assert.Equal(t, tc.expectedDept, emp["department"])
+				}
+				if tc.expectedStatus != "" {
+					assert.Equal(t, tc.expectedStatus, emp["status"])
+				}
+			}
+
+			t.Logf("Filter '%s' returned %d employees", tc.filter, len(employees))
+		})
+	}
+
+	// Cleanup in correct order
+	db.Unscoped().Delete(&lateWithPermission)
+	db.Unscoped().Delete(&leaveWithPermission)
+	db.Unscoped().Delete(&leaveWithoutPermission)
+	db.Unscoped().Delete(&lateWithoutPermission)
+	db.Unscoped().Delete(&earlyLeaveAttendance)
+	db.Unscoped().Delete(&lateAttendance)
+	for _, emp := range employees {
+		db.Unscoped().Delete(&emp)
+	}
 }
 
 func TestAddEmployeeByRoot(t *testing.T) {
@@ -309,278 +682,6 @@ func TestRootUpdateEmployeeSalary(t *testing.T) {
 
 	// Cleanup
 	db.Unscoped().Delete(&employee)
-}
-
-func TestGetEmployeesWithFilters(t *testing.T) {
-	app, db := SetupTest(t)
-
-	// Set up routes
-	app.Get("/employees", handlers.GetAllEmployees)
-	app.Patch("/employees/:id", func(c *fiber.Ctx) error {
-		c.Locals("claims", jwt.MapClaims{
-			"role": c.Get("X-Test-Role", ""),
-		})
-		return handlers.UpdateEmployee(c)
-	})
-
-	now := time.Now()
-	baseTime := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
-
-	// Create test employees with minimal info (as root)
-	employees := []models.User{
-		{
-			ID:          uuid.New().String(),
-			Nickname:    "it_user",
-			Role:        "employee",
-			Status:      "pending",
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			OnboardDate: baseTime.AddDate(0, -6, 0),
-		},
-		{
-			ID:          uuid.New().String(),
-			Nickname:    "hr_user",
-			Role:        "hr",
-			Status:      "pending",
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			OnboardDate: baseTime.AddDate(-1, 0, 0),
-		},
-	}
-	for _, emp := range employees {
-		result := db.Create(&emp)
-		assert.NoError(t, result.Error)
-	}
-	t.Log("Created employees with minimal info")
-
-	// Update employee profiles
-	updateData := []map[string]interface{}{
-		{
-			"full_name":    "IT Employee",
-			"email":        "it@company.com",
-			"phone_number": "+1234567890",
-			"address":      "123 IT St",
-			"position":     "Developer",
-			"department":   "IT",
-			"location":     "HQ",
-			"status":       "active",
-		},
-		{
-			"full_name":    "HR Employee",
-			"email":        "hr@company.com",
-			"phone_number": "+9876543210",
-			"address":      "456 HR St",
-			"position":     "HR Staff",
-			"department":   "HR",
-			"location":     "Branch A",
-			"status":       "active",
-		},
-	}
-
-	// Update profiles
-	for i, emp := range employees {
-		body, _ := json.Marshal(updateData[i])
-		req := httptest.NewRequest("PATCH", "/employees/"+emp.ID, bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Test-Role", "employee")
-		resp, err := app.Test(req)
-		assert.NoError(t, err)
-		assert.Equal(t, 200, resp.StatusCode)
-
-		// Verify update
-		var updatedEmp models.User
-		err = db.First(&updatedEmp, "id = ?", emp.ID).Error
-		assert.NoError(t, err)
-		assert.Equal(t, "active", updatedEmp.Status)
-	}
-	t.Log("Updated employee profiles")
-
-	// Create attendance records that will trigger auto-creation of absences
-	// 1. Late without permission (30 minutes late)
-	lateAttendance := models.Attendance{
-		ID:           uuid.New().String(),
-		UserID:       employees[0].ID,
-		CheckInTime:  baseTime.Add(30 * time.Minute),
-		CheckOutTime: baseTime.Add(9 * time.Hour),
-		ExpectedTime: baseTime,
-		OnTime:       false,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	result := db.Create(&lateAttendance)
-	assert.NoError(t, result.Error)
-
-	// Auto-create late without permission absence
-	lateWithoutPermission := models.Absence{
-		ID:          uuid.New().String(),
-		UserID:      employees[0].ID,
-		Date:        now,
-		Type:        "late_without_permission",
-		Reason:      "Late check-in without prior permission",
-		Status:      "approved",
-		StartDate:   lateAttendance.CheckInTime,
-		EndDate:     lateAttendance.CheckInTime,
-		ProcessedBy: &employees[1].ID, // HR processes the absence
-		ProcessedAt: &now,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	result = db.Create(&lateWithoutPermission)
-	assert.NoError(t, result.Error)
-
-	// 2. Leave without permission (left 2 hours early)
-	earlyLeaveAttendance := models.Attendance{
-		ID:           uuid.New().String(),
-		UserID:       employees[0].ID,
-		CheckInTime:  baseTime,
-		CheckOutTime: baseTime.Add(6 * time.Hour),
-		ExpectedTime: baseTime,
-		OnTime:       false,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	result = db.Create(&earlyLeaveAttendance)
-	assert.NoError(t, result.Error)
-
-	// Auto-create leave without permission absence
-	leaveWithoutPermission := models.Absence{
-		ID:          uuid.New().String(),
-		UserID:      employees[0].ID,
-		Date:        now,
-		Type:        "leave_without_permission",
-		Reason:      "Early leave without prior permission",
-		Status:      "approved",
-		StartDate:   earlyLeaveAttendance.CheckOutTime,
-		EndDate:     baseTime.Add(8 * time.Hour),
-		ProcessedBy: &employees[1].ID, // HR processes the absence
-		ProcessedAt: &now,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	result = db.Create(&leaveWithoutPermission)
-	assert.NoError(t, result.Error)
-
-	// 3. Create leave with permission (approved)
-	leaveWithPermission := models.Absence{
-		ID:          uuid.New().String(),
-		UserID:      employees[1].ID,
-		Date:        now,
-		Type:        "leave_with_permission",
-		Reason:      "Doctor appointment",
-		Status:      "approved",
-		StartDate:   baseTime.AddDate(0, 0, 1),
-		EndDate:     baseTime.AddDate(0, 0, 1).Add(4 * time.Hour),
-		ProcessedBy: &employees[1].ID,
-		ProcessedAt: &now,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	result = db.Create(&leaveWithPermission)
-	assert.NoError(t, result.Error)
-
-	// 4. Create late with permission request (approved)
-	lateWithPermission := models.Absence{
-		ID:          uuid.New().String(),
-		UserID:      employees[1].ID,
-		Date:        now,
-		Type:        "late_with_permission",
-		Reason:      "Traffic accident",
-		Status:      "approved",
-		StartDate:   baseTime,
-		EndDate:     baseTime.Add(1 * time.Hour),
-		ProcessedBy: &employees[1].ID, // HR processes the absence
-		ProcessedAt: &now,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	result = db.Create(&lateWithPermission)
-	assert.NoError(t, result.Error)
-
-	// Test cases
-	testCases := []struct {
-		name           string
-		filter         string
-		expectedCount  int
-		expectedDept   string
-		expectedStatus string
-	}{
-		{
-			name:          "Filter by IT department",
-			filter:        "department=IT",
-			expectedCount: 1,
-			expectedDept:  "IT",
-		},
-		{
-			name:           "Filter by late without permission",
-			filter:         "status=late_without_permission",
-			expectedCount:  1,
-			expectedStatus: "active",
-		},
-		{
-			name:           "Filter by leave without permission",
-			filter:         "status=leave_without_permission",
-			expectedCount:  1,
-			expectedStatus: "active",
-		},
-		{
-			name:           "Filter by leave with permission",
-			filter:         "status=leave_with_permission",
-			expectedCount:  1,
-			expectedStatus: "active",
-		},
-		{
-			name:           "Filter by late with permission",
-			filter:         "status=late_with_permission",
-			expectedCount:  1,
-			expectedStatus: "active",
-		},
-		{
-			name: "Filter by onboard date range",
-			filter: fmt.Sprintf("onboard_from=%s&onboard_to=%s",
-				time.Now().AddDate(-2, 0, 0).Format("2006-01-02"),
-				time.Now().Format("2006-01-02")),
-			expectedCount: 2,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/employees?"+tc.filter, nil)
-			resp, err := app.Test(req)
-			assert.NoError(t, err)
-			assert.Equal(t, 200, resp.StatusCode)
-
-			var response types.APIResponse
-			err = json.NewDecoder(resp.Body).Decode(&response)
-			assert.NoError(t, err)
-
-			employees := response.Data.([]interface{})
-			assert.Equal(t, tc.expectedCount, len(employees))
-
-			if len(employees) > 0 {
-				emp := employees[0].(map[string]interface{})
-				if tc.expectedDept != "" {
-					assert.Equal(t, tc.expectedDept, emp["department"])
-				}
-				if tc.expectedStatus != "" {
-					assert.Equal(t, tc.expectedStatus, emp["status"])
-				}
-			}
-
-			t.Logf("Filter '%s' returned %d employees", tc.filter, len(employees))
-		})
-	}
-
-	// Cleanup in correct order
-	db.Unscoped().Delete(&lateWithPermission)
-	db.Unscoped().Delete(&leaveWithPermission)
-	db.Unscoped().Delete(&leaveWithoutPermission)
-	db.Unscoped().Delete(&lateWithoutPermission)
-	db.Unscoped().Delete(&earlyLeaveAttendance)
-	db.Unscoped().Delete(&lateAttendance)
-	for _, emp := range employees {
-		db.Unscoped().Delete(&emp)
-	}
 }
 
 // func TestGetEmployeeTimeStats(t *testing.T) {
