@@ -50,12 +50,13 @@ type EmployeeFilters struct {
 	OnboardTo   string  `query:"onboard_to"`   // Format: YYYY-MM-DD
 }
 
-type EmployeeTimeStats struct {
-	Department   string `json:"department"`
-	EmployeeID   string `json:"employee_id"`
-	EmployeeName string `json:"employee_name"`
-	AvgCheckIn   string `json:"avg_check_in"`  // Time format HH:MM:SS
-	AvgCheckOut  string `json:"avg_check_out"` // Time format HH:MM:SS
+type EmployeeReportData struct {
+	Department     string `json:"department"`
+	EmployeeID     string `json:"employee_id"`
+	EmployeeName   string `json:"employee_name"`
+	AvgCheckIn     string `json:"avg_check_in"`     // Time format HH:MM:SS
+	AvgCheckOut    string `json:"avg_check_out"`    // Time format HH:MM:SS
+	TotalWorkHours string `json:"total_work_hours"` // Time format HH:MM:SS
 }
 
 type EmployeeWorkHoursStats struct {
@@ -71,6 +72,38 @@ type CheckInRequest struct {
 
 type CheckOutRequest struct {
 	UserID string `json:"user_id" validate:"required"`
+}
+
+type TimeRange string
+
+const (
+	Week  TimeRange = "week"
+	Month TimeRange = "month"
+	Year  TimeRange = "year"
+)
+
+type CompanyWorkStats struct {
+	TotalWorkHours  float64 `json:"total_work_hours"` // Total hours for all employees
+	AvgCheckInTime  string  `json:"avg_check_in"`     // Format HH:MM:SS
+	AvgCheckOutTime string  `json:"avg_check_out"`    // Format HH:MM:SS
+	TimeRange       string  `json:"time_range"`       // week/month/year
+	StartDate       string  `json:"start_date"`       // YYYY-MM-DD
+	EndDate         string  `json:"end_date"`         // YYYY-MM-DD
+}
+
+type TopEmployeeStats struct {
+	EmployeeID      string  `json:"employee_id"`
+	FullName        string  `json:"full_name"`
+	Position        string  `json:"position"`
+	Department      string  `json:"department"`
+	TotalWorkHours  float64 `json:"total_work_hours"`
+	AvgCheckInTime  string  `json:"avg_check_in"`
+	AvgCheckOutTime string  `json:"avg_check_out"`
+}
+
+type EmployeeReportResponse struct {
+	CompanyStats CompanyWorkStats   `json:"company_stats"`
+	TopEmployees []TopEmployeeStats `json:"top_employees"`
 }
 
 func GetAllEmployees(c *fiber.Ctx) error {
@@ -278,7 +311,7 @@ func UpdateEmployee(c *fiber.Ctx) error {
 }
 
 func GetEmployeeTimeStats(c *fiber.Ctx) error {
-	var stats []EmployeeTimeStats
+	var stats []EmployeeReportData
 
 	query := `
 		WITH time_seconds AS (
@@ -389,6 +422,219 @@ func GetEmployeeWorkHoursRanking(c *fiber.Ctx) error {
 	})
 }
 
+func GetEmployeeReport(c *fiber.Ctx) error {
+	timeRange := c.Query("time_range", "week")
+
+	// Get date range based on time_range
+	now := time.Now()
+	var startDate, endDate time.Time
+
+	switch TimeRange(timeRange) {
+	case Week:
+		startDate = now.AddDate(0, 0, -7)
+	case Month:
+		startDate = now.AddDate(0, -1, 0)
+	case Year:
+		startDate = now.AddDate(-1, 0, 0)
+	default:
+		return c.Status(400).JSON(types.APIResponse{
+			Success: false,
+			Error:   "Invalid time range. Use 'week', 'month', or 'year'",
+		})
+	}
+	endDate = now
+
+	// Company-wide stats query with debug info
+	companyStatsQuery := `
+	WITH time_calcs AS (
+		SELECT 
+			-- Convert UTC to local time and extract time
+			time(datetime(check_in_time, 'localtime')) as check_in_time,
+			time(datetime(check_out_time, 'localtime')) as check_out_time,
+			(julianday(check_out_time) - julianday(check_in_time)) * 24 as work_hours
+		FROM attendances a
+		JOIN users u ON a.user_id = u.id
+		WHERE u.status = 'active'
+			AND date(a.check_in_time) BETWEEN date(?) AND date(?)
+	),
+	time_seconds AS (
+		SELECT 
+			work_hours,
+			(
+				CAST(strftime('%H', check_in_time) AS INTEGER) * 3600 +
+				CAST(strftime('%M', check_in_time) AS INTEGER) * 60 +
+				CAST(strftime('%S', check_in_time) AS INTEGER)
+			) as seconds_since_midnight_in,
+			(
+				CAST(strftime('%H', check_out_time) AS INTEGER) * 3600 +
+				CAST(strftime('%M', check_out_time) AS INTEGER) * 60 +
+				CAST(strftime('%S', check_out_time) AS INTEGER)
+			) as seconds_since_midnight_out,
+			strftime('%H:%M:%S', check_in_time) as check_in_str,
+			strftime('%H:%M:%S', check_out_time) as check_out_str
+		FROM time_calcs
+	)
+	SELECT 
+		ROUND(SUM(work_hours), 2) as total_work_hours,
+		time(
+			ROUND(
+				AVG(seconds_since_midnight_in)
+			),
+			'unixepoch'
+		) as avg_check_in,
+		time(
+			ROUND(
+				AVG(seconds_since_midnight_out)
+			),
+			'unixepoch'
+		) as avg_check_out,
+		GROUP_CONCAT(check_in_str) as debug_check_ins,
+		GROUP_CONCAT(check_out_str) as debug_check_outs
+	FROM time_seconds
+`
+
+	type debugStats struct {
+		CompanyWorkStats
+		DebugCheckIns  string `json:"debug_check_ins"`
+		DebugCheckOuts string `json:"debug_check_outs"`
+	}
+
+	var stats debugStats
+	if err := DB.Raw(companyStatsQuery, startDate, endDate).Scan(&stats).Error; err != nil {
+		utils.Logger.Error("Failed to fetch company stats", zap.Error(err))
+		return c.Status(500).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrDatabaseError,
+		})
+	}
+
+	// Log debug info
+	utils.Logger.Info("Time calculation debug info",
+		zap.String("start_date", startDate.Format("2006-01-02")),
+		zap.String("end_date", endDate.Format("2006-01-02")),
+		zap.Float64("total_work_hours", stats.TotalWorkHours),
+		zap.String("avg_check_in", stats.AvgCheckInTime),
+		zap.String("avg_check_out", stats.AvgCheckOutTime),
+		zap.String("raw_check_ins", stats.DebugCheckIns),
+		zap.String("raw_check_outs", stats.DebugCheckOuts),
+	)
+
+	companyStats := CompanyWorkStats{
+		TotalWorkHours:  stats.TotalWorkHours,
+		AvgCheckInTime:  stats.AvgCheckInTime,
+		AvgCheckOutTime: stats.AvgCheckOutTime,
+		TimeRange:       timeRange,
+		StartDate:       startDate.Format("2006-01-02"),
+		EndDate:         endDate.Format("2006-01-02"),
+	}
+
+	// Top employees query with similar debug approach
+	topEmployeesQuery := `
+	WITH time_calcs AS (
+		SELECT 
+			u.id,
+			u.full_name,
+			u.position,
+			u.department,
+			time(datetime(check_in_time, 'localtime')) as check_in_time,
+			time(datetime(check_out_time, 'localtime')) as check_out_time,
+			(julianday(check_out_time) - julianday(check_in_time)) * 24 as work_hours
+		FROM users u
+		JOIN attendances a ON u.id = a.user_id
+		WHERE u.status = 'active'
+			AND date(a.check_in_time) BETWEEN date(?) AND date(?)
+	),
+	time_seconds AS (
+		SELECT 
+			id,
+			full_name,
+			position,
+			department,
+			work_hours,
+			(
+				CAST(strftime('%H', check_in_time) AS INTEGER) * 3600 +
+				CAST(strftime('%M', check_in_time) AS INTEGER) * 60 +
+				CAST(strftime('%S', check_in_time) AS INTEGER)
+			) as seconds_since_midnight_in,
+			(
+				CAST(strftime('%H', check_out_time) AS INTEGER) * 3600 +
+				CAST(strftime('%M', check_out_time) AS INTEGER) * 60 +
+				CAST(strftime('%S', check_out_time) AS INTEGER)
+			) as seconds_since_midnight_out,
+			strftime('%H:%M:%S', check_in_time) as check_in_str,
+			strftime('%H:%M:%S', check_out_time) as check_out_str
+		FROM time_calcs
+	)
+	SELECT 
+		id as employee_id,
+		full_name,
+		position,
+		department,
+		ROUND(SUM(work_hours), 2) as total_work_hours,
+		time(
+			ROUND(
+				AVG(seconds_since_midnight_in)
+			),
+			'unixepoch'
+		) as avg_check_in,
+		time(
+			ROUND(
+				AVG(seconds_since_midnight_out)
+			),
+			'unixepoch'
+		) as avg_check_out,
+		GROUP_CONCAT(check_in_str) as debug_check_ins,
+		GROUP_CONCAT(check_out_str) as debug_check_outs
+	FROM time_seconds
+	GROUP BY id, full_name, position, department
+	ORDER BY total_work_hours DESC
+	LIMIT 3
+`
+
+	type debugEmployeeStats struct {
+		TopEmployeeStats
+		DebugCheckIns  string `json:"debug_check_ins"`
+		DebugCheckOuts string `json:"debug_check_outs"`
+	}
+
+	var topEmployees []debugEmployeeStats
+	if err := DB.Raw(topEmployeesQuery, startDate, endDate).Scan(&topEmployees).Error; err != nil {
+		utils.Logger.Error("Failed to fetch top employees", zap.Error(err))
+		return c.Status(500).JSON(types.APIResponse{
+			Success: false,
+			Error:   types.ErrDatabaseError,
+		})
+	}
+
+	// Log debug info for each employee
+	for _, emp := range topEmployees {
+		utils.Logger.Info("Employee time calculation debug info",
+			zap.String("employee", emp.FullName),
+			zap.Float64("total_hours", emp.TotalWorkHours),
+			zap.String("avg_check_in", emp.AvgCheckInTime),
+			zap.String("avg_check_out", emp.AvgCheckOutTime),
+			zap.String("raw_check_ins", emp.DebugCheckIns),
+			zap.String("raw_check_outs", emp.DebugCheckOuts),
+		)
+	}
+
+	// Convert to regular stats for response
+	regularTopEmployees := make([]TopEmployeeStats, len(topEmployees))
+	for i, emp := range topEmployees {
+		regularTopEmployees[i] = emp.TopEmployeeStats
+	}
+
+	response := EmployeeReportResponse{
+		CompanyStats: companyStats,
+		TopEmployees: regularTopEmployees,
+	}
+
+	return c.JSON(types.APIResponse{
+		Success: true,
+		Data:    response,
+	})
+}
+
 // // CheckIn handles employee check-in
 // func CheckIn(c *fiber.Ctx) error {
 // 	var req CheckInRequest
@@ -426,7 +672,7 @@ func GetEmployeeWorkHoursRanking(c *fiber.Ctx) error {
 // 	attendance := models.Attendance{
 // 		ID:           uuid.New().String(),
 // 		UserID:       req.UserID,
-// 		CheckInTime:  now,
+// 		CheckInTime: now,
 // 		ExpectedTime: expectedTime,
 // 		IsLate:       now.After(expectedTime),
 // 		CreatedAt:    now,
