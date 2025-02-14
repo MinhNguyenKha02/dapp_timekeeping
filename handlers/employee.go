@@ -4,9 +4,6 @@ import (
 	"dapp_timekeeping/models"
 	"dapp_timekeeping/types"
 	"dapp_timekeeping/utils"
-	"fmt"
-	"strconv"
-	"strings"
 
 	"time"
 
@@ -425,51 +422,6 @@ func GetEmployeeWorkHoursRanking(c *fiber.Ctx) error {
 	})
 }
 
-func calculateAverageTime(timeStrings string) string {
-	if timeStrings == "" {
-		return ""
-	}
-
-	// Split the concatenated time strings
-	times := strings.Split(timeStrings, ",")
-	if len(times) == 0 {
-		return ""
-	}
-
-	var totalHours, totalMinutes, totalSeconds int
-
-	for _, timeStr := range times {
-		// Parse the time string
-		parts := strings.Split(timeStr, ":")
-		if len(parts) != 3 {
-			continue
-		}
-
-		// Convert to integers
-		hour, _ := strconv.Atoi(parts[0])
-		minute, _ := strconv.Atoi(parts[1])
-		second, _ := strconv.Atoi(parts[2])
-
-		totalHours += hour
-		totalMinutes += minute
-		totalSeconds += second
-	}
-
-	// Calculate averages
-	avgHours := totalHours / len(times)
-	avgMinutes := totalMinutes / len(times)
-	avgSeconds := totalSeconds / len(times)
-
-	// Normalize minutes and seconds
-	avgMinutes += avgSeconds / 60
-	avgSeconds %= 60
-	avgHours += avgMinutes / 60
-	avgMinutes %= 60
-
-	// Format as HH:MM:SS
-	return fmt.Sprintf("%02d:%02d:%02d", avgHours, avgMinutes, avgSeconds)
-}
-
 func GetEmployeeReport(c *fiber.Ctx) error {
 	timeRange := c.Query("time_range", "week")
 
@@ -493,23 +445,53 @@ func GetEmployeeReport(c *fiber.Ctx) error {
 	endDate = now
 
 	// Company-wide stats query with debug info
-	companyStatsQuery := `  
-	WITH time_calcs AS (  
-			SELECT   
-					(julianday(check_out_time) - julianday(check_in_time)) * 24 as work_hours,  
-					strftime('%H:%M:%S', check_in_time) as check_in_time,  
-					strftime('%H:%M:%S', check_out_time) as check_out_time  
-			FROM attendances a  
-			JOIN users u ON a.user_id = u.id  
-			WHERE u.status = 'active'  
-					AND date(a.check_in_time) BETWEEN date(?) AND date(?)  
-	)  
-	SELECT   
-			ROUND(SUM(work_hours), 2) as total_work_hours,  
-			GROUP_CONCAT(check_in_time) as debug_check_ins,  
-			GROUP_CONCAT(check_out_time) as debug_check_outs  
-	FROM time_calcs  
-	`
+	companyStatsQuery := `
+	WITH time_calcs AS (
+		SELECT 
+			-- Convert UTC to local time and extract time
+			time(datetime(check_in_time, 'localtime')) as check_in_time,
+			time(datetime(check_out_time, 'localtime')) as check_out_time,
+			(julianday(check_out_time) - julianday(check_in_time)) * 24 as work_hours
+		FROM attendances a
+		JOIN users u ON a.user_id = u.id
+		WHERE u.status = 'active'
+			AND date(a.check_in_time) BETWEEN date(?) AND date(?)
+	),
+	time_seconds AS (
+		SELECT 
+			work_hours,
+			(
+				CAST(strftime('%H', check_in_time) AS INTEGER) * 3600 +
+				CAST(strftime('%M', check_in_time) AS INTEGER) * 60 +
+				CAST(strftime('%S', check_in_time) AS INTEGER)
+			) as seconds_since_midnight_in,
+			(
+				CAST(strftime('%H', check_out_time) AS INTEGER) * 3600 +
+				CAST(strftime('%M', check_out_time) AS INTEGER) * 60 +
+				CAST(strftime('%S', check_out_time) AS INTEGER)
+			) as seconds_since_midnight_out,
+			strftime('%H:%M:%S', check_in_time) as check_in_str,
+			strftime('%H:%M:%S', check_out_time) as check_out_str
+		FROM time_calcs
+	)
+	SELECT 
+		ROUND(SUM(work_hours), 2) as total_work_hours,
+		time(
+			ROUND(
+				AVG(seconds_since_midnight_in)
+			),
+			'unixepoch'
+		) as avg_check_in,
+		time(
+			ROUND(
+				AVG(seconds_since_midnight_out)
+			),
+			'unixepoch'
+		) as avg_check_out,
+		GROUP_CONCAT(check_in_str) as debug_check_ins,
+		GROUP_CONCAT(check_out_str) as debug_check_outs
+	FROM time_seconds
+`
 
 	type debugStats struct {
 		CompanyWorkStats
@@ -526,59 +508,88 @@ func GetEmployeeReport(c *fiber.Ctx) error {
 		})
 	}
 
-	// Calculate average times from raw check-in and check-out times
-	avgCheckInTime := calculateAverageTime(stats.DebugCheckIns)
-	avgCheckOutTime := calculateAverageTime(stats.DebugCheckOuts)
-
 	// Log debug info
 	utils.Logger.Info("Time calculation debug info",
 		zap.String("start_date", startDate.Format("2006-01-02")),
 		zap.String("end_date", endDate.Format("2006-01-02")),
 		zap.Float64("total_work_hours", stats.TotalWorkHours),
-		zap.String("avg_check_in", avgCheckInTime),
-		zap.String("avg_check_out", avgCheckOutTime),
+		zap.String("avg_check_in", stats.AvgCheckInTime),
+		zap.String("avg_check_out", stats.AvgCheckOutTime),
 		zap.String("raw_check_ins", stats.DebugCheckIns),
 		zap.String("raw_check_outs", stats.DebugCheckOuts),
 	)
 
 	companyStats := CompanyWorkStats{
 		TotalWorkHours:  stats.TotalWorkHours,
-		AvgCheckInTime:  avgCheckInTime,
-		AvgCheckOutTime: avgCheckOutTime,
+		AvgCheckInTime:  stats.AvgCheckInTime,
+		AvgCheckOutTime: stats.AvgCheckOutTime,
 		TimeRange:       timeRange,
 		StartDate:       startDate.Format("2006-01-02"),
 		EndDate:         endDate.Format("2006-01-02"),
 	}
 
-	// Top employees query with similar approach
-	topEmployeesQuery := `  
-	WITH time_calcs AS (  
-			SELECT   
-					u.id,  
-					u.full_name,  
-					u.position,  
-					u.department,  
-					(julianday(check_out_time) - julianday(check_in_time)) * 24 as work_hours,  
-					strftime('%H:%M:%S', check_in_time) as check_in_time,  
-					strftime('%H:%M:%S', check_out_time) as check_out_time  
-			FROM users u  
-			JOIN attendances a ON u.id = a.user_id  
-			WHERE u.status = 'active'  
-					AND date(a.check_in_time) BETWEEN date(?) AND date(?)  
-	)  
-	SELECT   
-			id as employee_id,  
-			full_name,  
-			position,  
-			department,  
-			ROUND(SUM(work_hours), 2) as total_work_hours,  
-			GROUP_CONCAT(check_in_time) as debug_check_ins,  
-			GROUP_CONCAT(check_out_time) as debug_check_outs  
-	FROM time_calcs  
-	GROUP BY id, full_name, position, department  
-	ORDER BY total_work_hours DESC  
-	LIMIT 3  
-	`
+	// Top employees query with similar debug approach
+	topEmployeesQuery := `
+	WITH time_calcs AS (
+		SELECT 
+			u.id,
+			u.full_name,
+			u.position,
+			u.department,
+			time(datetime(check_in_time, 'localtime')) as check_in_time,
+			time(datetime(check_out_time, 'localtime')) as check_out_time,
+			(julianday(check_out_time) - julianday(check_in_time)) * 24 as work_hours
+		FROM users u
+		JOIN attendances a ON u.id = a.user_id
+		WHERE u.status = 'active'
+			AND date(a.check_in_time) BETWEEN date(?) AND date(?)
+	),
+	time_seconds AS (
+		SELECT 
+			id,
+			full_name,
+			position,
+			department,
+			work_hours,
+			(
+				CAST(strftime('%H', check_in_time) AS INTEGER) * 3600 +
+				CAST(strftime('%M', check_in_time) AS INTEGER) * 60 +
+				CAST(strftime('%S', check_in_time) AS INTEGER)
+			) as seconds_since_midnight_in,
+			(
+				CAST(strftime('%H', check_out_time) AS INTEGER) * 3600 +
+				CAST(strftime('%M', check_out_time) AS INTEGER) * 60 +
+				CAST(strftime('%S', check_out_time) AS INTEGER)
+			) as seconds_since_midnight_out,
+			strftime('%H:%M:%S', check_in_time) as check_in_str,
+			strftime('%H:%M:%S', check_out_time) as check_out_str
+		FROM time_calcs
+	)
+	SELECT 
+		id as employee_id,
+		full_name,
+		position,
+		department,
+		ROUND(SUM(work_hours), 2) as total_work_hours,
+		time(
+			ROUND(
+				AVG(seconds_since_midnight_in)
+			),
+			'unixepoch'
+		) as avg_check_in,
+		time(
+			ROUND(
+				AVG(seconds_since_midnight_out)
+			),
+			'unixepoch'
+		) as avg_check_out,
+		GROUP_CONCAT(check_in_str) as debug_check_ins,
+		GROUP_CONCAT(check_out_str) as debug_check_outs
+	FROM time_seconds
+	GROUP BY id, full_name, position, department
+	ORDER BY total_work_hours DESC
+	LIMIT 3
+`
 
 	type debugEmployeeStats struct {
 		TopEmployeeStats
@@ -595,18 +606,15 @@ func GetEmployeeReport(c *fiber.Ctx) error {
 		})
 	}
 
-	// Log debug info for each employee and calculate average times
-	for i := range topEmployees {
-		topEmployees[i].AvgCheckInTime = calculateAverageTime(topEmployees[i].DebugCheckIns)
-		topEmployees[i].AvgCheckOutTime = calculateAverageTime(topEmployees[i].DebugCheckOuts)
-
+	// Log debug info for each employee
+	for _, emp := range topEmployees {
 		utils.Logger.Info("Employee time calculation debug info",
-			zap.String("employee", topEmployees[i].FullName),
-			zap.Float64("total_hours", topEmployees[i].TotalWorkHours),
-			zap.String("avg_check_in", topEmployees[i].AvgCheckInTime),
-			zap.String("avg_check_out", topEmployees[i].AvgCheckOutTime),
-			zap.String("raw_check_ins", topEmployees[i].DebugCheckIns),
-			zap.String("raw_check_outs", topEmployees[i].DebugCheckOuts),
+			zap.String("employee", emp.FullName),
+			zap.Float64("total_hours", emp.TotalWorkHours),
+			zap.String("avg_check_in", emp.AvgCheckInTime),
+			zap.String("avg_check_out", emp.AvgCheckOutTime),
+			zap.String("raw_check_ins", emp.DebugCheckIns),
+			zap.String("raw_check_outs", emp.DebugCheckOuts),
 		)
 	}
 
